@@ -1,0 +1,15 @@
+{
+  "source": "https://github.com/Pimpoli/GodotLuau",
+  "base_commit": "427fccb87b7a6ad32679478a80b2a3c142eaf533",
+  "includes_local_changes": true,
+  "dependencies": {
+    "godot-cpp": {
+      "url": "https://github.com/godotengine/godot-cpp.git",
+      "revision": "d5cc777a89d899665fb61f1650ef0dc0cf6488c4"
+    },
+    "luau": {
+      "url": "https://github.com/luau-lang/luau.git",
+      "revision": "9e2984fd0334414a2ef62ceede0c06dab7574d55"
+    }
+  }
+}

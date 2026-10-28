@@ -1,0 +1,13 @@
+; GodotLuau IA — extension OPCIONAL (chat local con llama.cpp).
+; Si esta carpeta no existe, GodotLuau funciona igual: el panel solo
+; ofrece descargarla. Va aparte porque llama.cpp pesa ~10 MB y no tiene
+; por que pagarlo quien no use el chat.
+[configuration]
+entry_symbol = "godot_luau_ia_init"
+compatibility_minimum = "4.3"
+
+[libraries]
+windows.debug.x86_64 = "res://GodotLuau/ia/bin/godot_luau_ia.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://GodotLuau/ia/bin/godot_luau_ia.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://GodotLuau/ia/bin/godot_luau_ia.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://GodotLuau/ia/bin/godot_luau_ia.linux.template_release.x86_64.so"

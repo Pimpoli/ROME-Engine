@@ -1,0 +1,1882 @@
+{
+ "rig": "R15",
+ "hipHeight": 2.192423105239868,
+ "partes": [
+  {
+   "nombre": "HumanoidRootPart",
+   "tamano": [
+    2,
+    2,
+    1
+   ],
+   "cframe": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 1
+  },
+  {
+   "nombre": "LeftHand",
+   "tamano": [
+    0.9843,
+    0.3158,
+    1.0283
+   ],
+   "cframe": [
+    -1.4721,
+    -0.8659,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LeftHand.obj"
+  },
+  {
+   "nombre": "RightHand",
+   "tamano": [
+    0.9843,
+    0.3158,
+    1.0283
+   ],
+   "cframe": [
+    1.4721,
+    -0.8659,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/RightHand.obj"
+  },
+  {
+   "nombre": "LeftLowerArm",
+   "tamano": [
+    1.0011,
+    1.1175,
+    1.0019
+   ],
+   "cframe": [
+    -1.4721,
+    -0.2021,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LeftLowerArm.obj"
+  },
+  {
+   "nombre": "RightLowerArm",
+   "tamano": [
+    1.0011,
+    1.1175,
+    1.0019
+   ],
+   "cframe": [
+    1.4721,
+    -0.2021,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/RightLowerArm.obj"
+  },
+  {
+   "nombre": "LeftUpperArm",
+   "tamano": [
+    1.0011,
+    1.2416,
+    1.0019
+   ],
+   "cframe": [
+    -1.4721,
+    0.4276,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LeftUpperArm.obj"
+  },
+  {
+   "nombre": "RightUpperArm",
+   "tamano": [
+    1.0011,
+    1.2416,
+    1.0019
+   ],
+   "cframe": [
+    1.4721,
+    0.4276,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/RightUpperArm.obj"
+  },
+  {
+   "nombre": "LeftFoot",
+   "tamano": [
+    1.0089,
+    0.312,
+    1.0011
+   ],
+   "cframe": [
+    -0.5,
+    -3.0364,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LeftFoot.obj"
+  },
+  {
+   "nombre": "LeftLowerLeg",
+   "tamano": [
+    0.9928,
+    1.3007,
+    0.9728
+   ],
+   "cframe": [
+    -0.5,
+    -2.3339,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LeftLowerLeg.obj"
+  },
+  {
+   "nombre": "UpperTorso",
+   "tamano": [
+    1.9432,
+    1.698,
+    1.004
+   ],
+   "cframe": [
+    0.0,
+    0.249,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/UpperTorso.obj"
+  },
+  {
+   "nombre": "LeftUpperLeg",
+   "tamano": [
+    0.9928,
+    1.3629,
+    0.9727
+   ],
+   "cframe": [
+    -0.5,
+    -1.4714,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LeftUpperLeg.obj"
+  },
+  {
+   "nombre": "RightFoot",
+   "tamano": [
+    1.0089,
+    0.312,
+    1.0011
+   ],
+   "cframe": [
+    0.5,
+    -3.0365,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/RightFoot.obj"
+  },
+  {
+   "nombre": "RightLowerLeg",
+   "tamano": [
+    0.9928,
+    1.3007,
+    0.9728
+   ],
+   "cframe": [
+    0.5,
+    -2.334,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/RightLowerLeg.obj"
+  },
+  {
+   "nombre": "LowerTorso",
+   "tamano": [
+    1.9914,
+    0.4007,
+    1.004
+   ],
+   "cframe": [
+    0.0,
+    -0.8,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/LowerTorso.obj"
+  },
+  {
+   "nombre": "RightUpperLeg",
+   "tamano": [
+    0.9928,
+    1.3629,
+    0.9727
+   ],
+   "cframe": [
+    0.5,
+    -1.4714,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/RightUpperLeg.obj"
+  },
+  {
+   "nombre": "Head",
+   "tamano": [
+    1.2,
+    1.2,
+    1.2
+   ],
+   "cframe": [
+    0.0,
+    1.6738,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    163,
+    162,
+    165
+   ],
+   "transparencia": 0,
+   "malla": "mallas/Head.obj"
+  }
+ ],
+ "juntas": [
+  {
+   "nombre": "Root",
+   "clase": "Motor6D",
+   "padre": "LowerTorso",
+   "parte0": "HumanoidRootPart",
+   "parte1": "LowerTorso",
+   "c0": [
+    0.0,
+    -1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "Waist",
+   "clase": "Motor6D",
+   "padre": "UpperTorso",
+   "parte0": "LowerTorso",
+   "parte1": "UpperTorso",
+   "c0": [
+    0.0,
+    0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    -0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftHip",
+   "clase": "Motor6D",
+   "padre": "LeftUpperLeg",
+   "parte0": "LowerTorso",
+   "parte1": "LeftUpperLeg",
+   "c0": [
+    -0.5,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.4714,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightHip",
+   "clase": "Motor6D",
+   "padre": "RightUpperLeg",
+   "parte0": "LowerTorso",
+   "parte1": "RightUpperLeg",
+   "c0": [
+    0.5,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.4714,
+    -0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftShoulder",
+   "clase": "Motor6D",
+   "padre": "LeftUpperArm",
+   "parte0": "UpperTorso",
+   "parte1": "LeftUpperArm",
+   "c0": [
+    -0.9716,
+    0.5975,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.5005,
+    0.4189,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightShoulder",
+   "clase": "Motor6D",
+   "padre": "RightUpperArm",
+   "parte0": "UpperTorso",
+   "parte1": "RightUpperArm",
+   "c0": [
+    0.9716,
+    0.5975,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    -0.5005,
+    0.4189,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftKnee",
+   "clase": "Motor6D",
+   "padre": "LeftLowerLeg",
+   "parte0": "LeftUpperLeg",
+   "parte1": "LeftLowerLeg",
+   "c0": [
+    0.0,
+    -0.4493,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.4132,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightKnee",
+   "clase": "Motor6D",
+   "padre": "RightLowerLeg",
+   "parte0": "RightUpperLeg",
+   "parte1": "RightLowerLeg",
+   "c0": [
+    0.0,
+    -0.4492,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.4134,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "Neck",
+   "clase": "Motor6D",
+   "padre": "Head",
+   "parte0": "UpperTorso",
+   "parte1": "Head",
+   "c0": [
+    0.0,
+    0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    -0.5758,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftElbow",
+   "clase": "Motor6D",
+   "padre": "LeftLowerArm",
+   "parte0": "LeftUpperArm",
+   "parte1": "LeftLowerArm",
+   "c0": [
+    0.0005,
+    -0.3549,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0005,
+    0.2748,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightElbow",
+   "clase": "Motor6D",
+   "padre": "RightLowerArm",
+   "parte0": "RightUpperArm",
+   "parte1": "RightLowerArm",
+   "c0": [
+    0.0,
+    -0.355,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.2747,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftAnkle",
+   "clase": "Motor6D",
+   "padre": "LeftFoot",
+   "parte0": "LeftLowerLeg",
+   "parte1": "LeftFoot",
+   "c0": [
+    0.0,
+    -0.5965,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.106,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightAnkle",
+   "clase": "Motor6D",
+   "padre": "RightFoot",
+   "parte0": "RightLowerLeg",
+   "parte1": "RightFoot",
+   "c0": [
+    0.0,
+    -0.5965,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.106,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftWrist",
+   "clase": "Motor6D",
+   "padre": "LeftHand",
+   "parte0": "LeftLowerArm",
+   "parte1": "LeftHand",
+   "c0": [
+    0.0005,
+    -0.5322,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0005,
+    0.1316,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightWrist",
+   "clase": "Motor6D",
+   "padre": "RightHand",
+   "parte0": "RightLowerArm",
+   "parte1": "RightHand",
+   "c0": [
+    0.0,
+    -0.5322,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "c1": [
+    0.0,
+    0.1316,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  }
+ ],
+ "attachments": [
+  {
+   "nombre": "RootRigAttachment",
+   "parte": "HumanoidRootPart",
+   "cframe": [
+    0.0,
+    -1.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RootAttachment",
+   "parte": "HumanoidRootPart",
+   "cframe": [
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftWristRigAttachment",
+   "parte": "LeftHand",
+   "cframe": [
+    0.0005,
+    0.1316,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftGripAttachment",
+   "parte": "LeftHand",
+   "cframe": [
+    0.0,
+    -0.1578,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -1.0,
+    0.0
+   ]
+  },
+  {
+   "nombre": "RightWristRigAttachment",
+   "parte": "RightHand",
+   "cframe": [
+    0.0,
+    0.1316,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightGripAttachment",
+   "parte": "RightHand",
+   "cframe": [
+    0.0,
+    -0.1578,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    -1.0,
+    0.0
+   ]
+  },
+  {
+   "nombre": "LeftElbowRigAttachment",
+   "parte": "LeftLowerArm",
+   "cframe": [
+    0.0005,
+    0.2748,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftWristRigAttachment",
+   "parte": "LeftLowerArm",
+   "cframe": [
+    0.0005,
+    -0.5322,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightElbowRigAttachment",
+   "parte": "RightLowerArm",
+   "cframe": [
+    0.0,
+    0.2747,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightWristRigAttachment",
+   "parte": "RightLowerArm",
+   "cframe": [
+    0.0,
+    -0.5322,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftShoulderRigAttachment",
+   "parte": "LeftUpperArm",
+   "cframe": [
+    0.5005,
+    0.4189,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftElbowRigAttachment",
+   "parte": "LeftUpperArm",
+   "cframe": [
+    0.0005,
+    -0.3549,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftShoulderAttachment",
+   "parte": "LeftUpperArm",
+   "cframe": [
+    0.0,
+    0.6208,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightShoulderRigAttachment",
+   "parte": "RightUpperArm",
+   "cframe": [
+    -0.5005,
+    0.4189,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightElbowRigAttachment",
+   "parte": "RightUpperArm",
+   "cframe": [
+    0.0,
+    -0.355,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightShoulderAttachment",
+   "parte": "RightUpperArm",
+   "cframe": [
+    0.0,
+    0.6208,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftAnkleRigAttachment",
+   "parte": "LeftFoot",
+   "cframe": [
+    0.0,
+    0.106,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftFootAttachment",
+   "parte": "LeftFoot",
+   "cframe": [
+    0.0184,
+    -0.1596,
+    -0.0503,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftKneeRigAttachment",
+   "parte": "LeftLowerLeg",
+   "cframe": [
+    0.0,
+    0.4132,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftAnkleRigAttachment",
+   "parte": "LeftLowerLeg",
+   "cframe": [
+    0.0,
+    -0.5965,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "WaistRigAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.0,
+    -0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "NeckRigAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.0,
+    0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftShoulderRigAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    -0.9716,
+    0.5975,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightShoulderRigAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.9716,
+    0.5975,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "BodyFrontAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.0,
+    -0.2122,
+    -0.502,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "BodyBackAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.0,
+    -0.2122,
+    0.502,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftCollarAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    -0.9716,
+    0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "NeckAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.0,
+    0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightCollarAttachment",
+   "parte": "UpperTorso",
+   "cframe": [
+    0.9716,
+    0.849,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftHipRigAttachment",
+   "parte": "LeftUpperLeg",
+   "cframe": [
+    0.0,
+    0.4714,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftKneeRigAttachment",
+   "parte": "LeftUpperLeg",
+   "cframe": [
+    0.0,
+    -0.4493,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightAnkleRigAttachment",
+   "parte": "RightFoot",
+   "cframe": [
+    0.0,
+    0.106,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightFootAttachment",
+   "parte": "RightFoot",
+   "cframe": [
+    -0.0184,
+    -0.1596,
+    -0.0503,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightKneeRigAttachment",
+   "parte": "RightLowerLeg",
+   "cframe": [
+    0.0,
+    0.4134,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightAnkleRigAttachment",
+   "parte": "RightLowerLeg",
+   "cframe": [
+    0.0,
+    -0.5965,
+    0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RootRigAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    0.0,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "WaistRigAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    0.0,
+    0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "LeftHipRigAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    -0.5,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightHipRigAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    0.5,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "WaistBackAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    0.0,
+    -0.2,
+    0.5,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "WaistCenterAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    0.0,
+    -0.2,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "WaistFrontAttachment",
+   "parte": "LowerTorso",
+   "cframe": [
+    0.0,
+    -0.2,
+    -0.5,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightHipRigAttachment",
+   "parte": "RightUpperLeg",
+   "cframe": [
+    0.0,
+    0.4714,
+    -0.0001,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "RightKneeRigAttachment",
+   "parte": "RightUpperLeg",
+   "cframe": [
+    0.0,
+    -0.4492,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "FaceCenterAttachment",
+   "parte": "Head",
+   "cframe": [
+    0.0,
+    -0.094,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "FaceFrontAttachment",
+   "parte": "Head",
+   "cframe": [
+    0.0,
+    0.0,
+    -0.5813,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "HairAttachment",
+   "parte": "Head",
+   "cframe": [
+    0.0,
+    0.5896,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "HatAttachment",
+   "parte": "Head",
+   "cframe": [
+    0.0,
+    0.5896,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  },
+  {
+   "nombre": "NeckRigAttachment",
+   "parte": "Head",
+   "cframe": [
+    0.0,
+    -0.5758,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ]
+  }
+ ],
+ "cara": "../cara.png",
+ "cara_malla": "mallas/Cara.obj"
+}

@@ -1,0 +1,51 @@
+[configuration]
+entry_symbol = "luau_extension_init"
+compatibility_minimum = "4.3"
+
+[libraries]
+windows.debug.x86_64 = "res://GodotLuau/bin/godot_luau.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://GodotLuau/bin/godot_luau.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://GodotLuau/bin/godot_luau.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://GodotLuau/bin/godot_luau.linux.template_release.x86_64.so"
+
+[icons]
+RobloxTemplate = "res://GodotLuau/icons/RobloxDataModel.svg"
+RobloxGame3D = "res://GodotLuau/icons/RobloxGame3D.svg"
+RobloxGame2D = "res://GodotLuau/icons/RobloxGame2D.svg"
+Folder = "res://GodotLuau/icons/Folder.svg"
+
+; Scripts
+LocalScript = "res://GodotLuau/icons/LocalScript.svg"
+ServerScript = "res://GodotLuau/icons/ServerScript.svg"
+ModuleScript = "res://GodotLuau/icons/ModuleScript.svg"
+
+; Personajes y Fisicas
+RobloxPlayer = "res://GodotLuau/icons/RobloxPlayer.svg"
+RobloxPlayer2D = "res://GodotLuau/icons/RobloxPlayer2D.svg"
+RobloxPart = "res://GodotLuau/icons/RobloxPart.svg"
+Part = "res://GodotLuau/icons/RobloxPart.svg"
+Humanoid = "res://GodotLuau/icons/Humanoid.svg"
+Humanoid2D = "res://GodotLuau/icons/Humanoid2D.svg"
+
+; UI y Chat
+RobloxChat = "res://GodotLuau/icons/RobloxChat.svg"
+TextChatService = "res://GodotLuau/icons/TextChatService.svg"
+
+; Servicios de Roblox
+RobloxWorkspace = "res://GodotLuau/icons/Workspace.svg"
+RobloxWorkspace2D = "res://GodotLuau/icons/Workspace2D.svg"
+Players = "res://GodotLuau/icons/Players.svg"
+Lighting = "res://GodotLuau/icons/Lighting.svg"
+MaterialService = "res://GodotLuau/icons/MaterialService.svg"
+ReplicatedFirst = "res://GodotLuau/icons/ReplicatedFirst.svg"
+ReplicatedStorage = "res://GodotLuau/icons/ReplicatedStorage.svg"
+ServerScriptService = "res://GodotLuau/icons/ServerScriptService.svg"
+ServerStorage = "res://GodotLuau/icons/ServerStorage.svg"
+StarterGui = "res://GodotLuau/icons/StarterGui.svg"
+StarterPack = "res://GodotLuau/icons/StarterPack.svg"
+StarterPlayer = "res://GodotLuau/icons/StarterPlayer.svg"
+StarterCharacterScripts = "res://GodotLuau/icons/StarterCharacterScripts.svg"
+StarterPlayerScripts = "res://GodotLuau/icons/StarterPlayerScripts.svg"
+Teams = "res://GodotLuau/icons/Teams.svg"
+SoundService = "res://GodotLuau/icons/SoundService.svg"
+NetworkClient = "res://GodotLuau/icons/NetworkClient.svg"

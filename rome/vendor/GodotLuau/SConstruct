@@ -1,0 +1,150 @@
+#!/usr/bin/env python
+
+env = SConscript("godot-cpp/SConstruct")
+
+# 0. Luau usa excepciones de C++ en su bucle de ejecucion (luau/VM/src/ldo.cpp).
+#    godot-cpp compila con -fno-exceptions por defecto, lo que impide construir
+#    Luau. Reactivamos las excepciones para TODA la extension para que el
+#    proyecto compile sin tener que pasar flags extra en la linea de comandos.
+def _enable_exceptions(e):
+    for key in ("CCFLAGS", "CXXFLAGS", "CFLAGS"):
+        if key in e:
+            e[key] = [f for f in e[key] if str(f) != "-fno-exceptions"]
+    if e.get("is_msvc", False):
+        e.Append(CXXFLAGS=["/EHsc"])
+    else:
+        e.Append(CXXFLAGS=["-fexceptions"])
+_enable_exceptions(env)
+
+# Objetos con el sufijo del target (.windows.template_debug.x86_64.o), como ya
+# hace godot-cpp con los suyos. Sin esto los de src/ y luau/ se llamaban igual
+# en debug y en release: compilar uno detras del otro recompilaba Luau entero y
+# los dos TU grandes aunque no hubiera cambiado nada (68 s medidos).
+env["SHOBJSUFFIX"] = env["suffix"] + env["SHOBJSUFFIX"]
+# Una base de firmas por target, para que debug y release se puedan compilar a
+# la vez (tools/compilar.py): dos SCons escribiendo el mismo .sconsign la rompen.
+SConsignFile(".sconsign" + env["suffix"] + ".dblite")
+
+# 1. Rutas de inclusion para que SCons encuentre los encabezados.
+#    src/ esta organizado en subcarpetas (core/editor/services/characters/
+#    gameplay/ui); las anadimos todas al CPPPATH para que los #include "x.h"
+#    (sin ruta) sigan resolviendo sin tener que reescribirlos.
+env.Append(CPPPATH=[
+    "src/",
+    "src/core",
+    "src/editor",
+    "src/services",
+    "src/characters",
+    "src/gameplay",
+    "src/ui",
+    "src/importer",
+    "luau/VM/include",
+    "luau/Compiler/include",
+    "luau/Ast/include",
+    "luau/Common/include",
+    # CodeGen = el compilador NATIVO de Luau (ver use_codegen mas abajo).
+    "luau/CodeGen/include",
+    "luau/VM/src"
+])
+
+# 2. Archivos de nuestra extensión (los .cpp viven en src/core/)
+sources = Glob("src/core/*.cpp")
+
+# 3. Archivos del "Cerebro" de Luau (Agregamos la carpeta src de Common)
+# (Probado 08/10/2026: la VM a -O3 en la DLL de debug no cambia nada medible
+# frente al -O2 de godot-cpp en la carga de Build a Mountain, A/B intercalado.)
+sources += Glob("luau/VM/src/*.cpp")
+sources += Glob("luau/Compiler/src/*.cpp")
+sources += Glob("luau/Ast/src/*.cpp")
+sources += Glob("luau/Common/src/*.cpp")
+
+# ── Luau NATIVO (JIT), apagado por defecto ────────────────────────────
+# Con `scons ... use_codegen=yes` se compila el CodeGen de Luau y el Lua del
+# juego pasa de interpretado a codigo maquina, como en Roblox.
+#
+# POR QUE VIENE APAGADO: un JIT reserva memoria EJECUTABLE en caliente, y eso
+# dispara el Control de aplicaciones de Windows. Medido en esta maquina con
+# Smart App Control activado: la DLL con CodeGen queda bloqueada al cargar
+#   "Error 4551: Una directiva de Control de aplicaciones bloqueo este archivo"
+#   (CodeIntegrity 3077/3118: no cumple el nivel de firma exigido)
+# mientras que la MISMA DLL sin CodeGen carga sin problema. Encenderlo sin
+# firmar el binario con un certificado de confianza dejaria el motor inservible
+# para cualquier usuario que tenga Smart App Control puesto.
+if ARGUMENTS.get("use_codegen", "no") == "yes":
+    sources += Glob("luau/CodeGen/src/*.cpp")
+    env.Append(CPPDEFINES=["GL_LUAU_CODEGEN"])
+
+# 4. Forzamos el nombre de la libreria para que Godot la detecte.
+#    Sin prefijo "lib" en Linux: godot_luau.gdextension espera
+#    godot_luau.linux.*.so (igual que la .dll de Windows).
+env["SHLIBPREFIX"] = ""
+target_name = "GodotLuau/bin/godot_luau" + env["suffix"] + env["SHLIBSUFFIX"]
+
+# `scons ... simbolos=yes`: enlaza SIN quitar la tabla de simbolos (sin -s),
+# para ponerle nombre a las muestras de GL_MUESTREO=1 (src/core/gl_muestreo.cpp)
+# con `nm`. Solo reenlaza. Nunca para una release: la DLL engorda.
+if ARGUMENTS.get("simbolos", "no") == "yes" and not env.get("is_msvc", False):
+    env["LINKFLAGS"] = [f for f in env["LINKFLAGS"] if str(f) != "-s"]
+
+library = env.SharedLibrary(target=target_name, source=sources)
+
+Default(library)
+
+# ── GodotLuau IA (OPCIONAL) ───────────────────────────────────────────
+#  Con `scons ... build_ia=yes` se compila ADEMAS una segunda GDExtension con
+#  el chat local (llama.cpp). Va aparte a proposito: llama.cpp añade ~10 MB y
+#  no tiene por que pagarlo quien no use la IA. Si la carpeta no esta, el panel
+#  ofrece descargarla y ya.
+#
+#  llama.cpp se compila antes con CMake (tools/build_llama.py, que deja los .a
+#  en llama.cpp/build/); aqui solo se enlaza.
+if ARGUMENTS.get("build_ia", "no") == "yes":
+    import os
+    lc = "llama.cpp"
+    # Con `ia_vulkan=yes` se enlaza el build con backend Vulkan (build_vk/), que
+    # ademas de la CPU puede descargar capas a la GPU. Se elige a proposito y no
+    # por defecto: en una GPU INTEGRADA la memoria es compartida y no siempre
+    # gana — hay que medirlo (ver el informe de la sesion).
+    usar_vk = ARGUMENTS.get("ia_vulkan", "no") == "yes"
+    bdir = "build_vk" if usar_vk else "build"
+    libs_ia = [
+        os.path.join(lc, bdir, "src", "libllama.a"),
+        os.path.join(lc, bdir, "ggml", "src", "ggml.a"),
+    ]
+    if usar_vk:
+        libs_ia.append(os.path.join(lc, bdir, "ggml", "src", "ggml-vulkan", "ggml-vulkan.a"))
+    libs_ia += [
+        os.path.join(lc, bdir, "ggml", "src", "ggml-cpu.a"),
+        os.path.join(lc, bdir, "ggml", "src", "ggml-base.a"),
+    ]
+    faltan = [l for l in libs_ia if not os.path.exists(l)]
+    if faltan:
+        print("!! No estan las librerias de llama.cpp:")
+        for l in faltan:
+            print("   ", l)
+        print("   Compilalas antes con:  python tools/build_llama.py")
+    else:
+        env_ia = env.Clone()
+        env_ia.Append(CPPPATH=[
+            "src/ia",
+            os.path.join(lc, "include"),
+            os.path.join(lc, "ggml", "include"),
+        ])
+        # El orden importa al enlazar estatico: llama depende de ggml.
+        env_ia.Append(LIBS=[env_ia.File(l) for l in libs_ia])
+        if usar_vk:
+            # vulkan-1 va AL FINAL: en enlazado estatico quien provee simbolos
+            # tiene que ir DETRAS de quien los usa (ggml-vulkan.a). Al reves,
+            # ld no la mira y salen cientos de "undefined reference to vk...".
+            cands = [
+                "C:/msys64/ucrt64/lib/libvulkan-1.dll.a",
+                "C:/msys64/mingw64/lib/libvulkan-1.dll.a",
+            ]
+            vk = next((c for c in cands if os.path.exists(c)), None)
+            if vk:
+                env_ia.Append(LIBS=[env_ia.File(vk)])
+            else:
+                print("!! No se encontro libvulkan-1.dll.a (pacman -S mingw-w64-ucrt-x86_64-vulkan-loader)")
+        ia_target = "GodotLuau/ia/bin/godot_luau_ia" + env["suffix"] + env["SHLIBSUFFIX"]
+        ia_lib = env_ia.SharedLibrary(target=ia_target, source=["src/ia/register_ia.cpp"])
+        Default(ia_lib)

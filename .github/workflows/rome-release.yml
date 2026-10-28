@@ -1,0 +1,87 @@
+name: ROME Linux standalone release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag receiving the verified Linux asset
+        required: true
+        default: v0.1.0-alpha.1
+        type: string
+      source_ref:
+        description: Source commit or branch (empty builds this workflow's commit)
+        required: false
+        type: string
+      publish:
+        description: Upload verified binary and checksum to the existing release
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rome-linux-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      SCONS_CACHE: ${{ github.workspace }}/bin/rome_scons_cache
+    steps:
+      - name: Check out ROME source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libx11-dev libxcursor-dev libxinerama-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev \
+            libxi-dev libxrandr-dev libwayland-dev libwayland-bin libxkbcommon-dev \
+            libfontconfig1-dev libdbus-1-dev libspeechd-dev mesa-vulkan-drivers
+          python -m pip install 'scons==4.10.1' zstandard
+
+      - name: Restore compilation cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.SCONS_CACHE }}
+          key: rome-linux-x86_64-${{ hashFiles('version.py', 'rome/vendor/GodotLuau/dependencies.json') }}-${{ github.sha }}
+          restore-keys: |
+            rome-linux-x86_64-${{ hashFiles('version.py', 'rome/vendor/GodotLuau/dependencies.json') }}-
+
+      - name: Build editor, Luau and standalone executable; run gameplay checks
+        run: python rome/build_release_platform.py --version "$RELEASE_TAG" --jobs 2
+
+      - name: Save verified Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ROME-linux-x86_64-${{ inputs.release_tag }}
+          path: |
+            bin/release/ROME-*-linux-x86_64
+            bin/release/ROME-*-linux-x86_64.sha256
+          if-no-files-found: error
+
+      - name: Publish Linux assets to existing release
+        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+          gh release upload "$RELEASE_TAG" bin/release/ROME-*-linux-x86_64 bin/release/ROME-*-linux-x86_64.sha256 \
+            --repo "$GITHUB_REPOSITORY" --clobber

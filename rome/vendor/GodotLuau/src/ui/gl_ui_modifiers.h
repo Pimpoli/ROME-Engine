@@ -1,0 +1,1555 @@
+#ifndef GL_UI_MODIFIERS_H
+#define GL_UI_MODIFIERS_H
+
+// ════════════════════════════════════════════════════════════════════
+//  Modificadores de UI de Roblox (UICorner, UIListLayout, UIGridLayout,
+//  UIPadding, UIStroke, UIGradient, UIScale, las constraints…) con TODAS
+//  sus propiedades y con la semantica real de Roblox.
+//
+//  Por que se reescribieron: las versiones viejas llamaban a set_position /
+//  set_size sobre TODOS los hijos del padre en cada frame:
+//
+//    · UIPadding forzaba a cada hijo a llenar el area entera  -> todas las UIs
+//      de un panel salian apiladas una encima de otra en el mismo sitio.
+//    · UIAspectRatioConstraint y UISizeConstraint reescribian el tamaño del
+//      padre cada frame, peleandose con las anclas -> la UI "temblaba" y
+//      acababa donde no debia.
+//    · UIPageLayout forzaba Visible en los hijos -> aparecian paneles que el
+//      juego tenia guardados.
+//    · UIListLayout ignoraba LayoutOrder, asi que los botones salian en el
+//      orden del arbol y no en el del juego.
+//
+//  Ahora las CONSTRAINTS son solo datos (las aplica el propio GuiObject al
+//  colocarse, en gl_gui_core.h) y los LAYOUTS solo recolocan cuando algo ha
+//  cambiado de verdad (huella gl_gui_children_stamp).
+// ════════════════════════════════════════════════════════════════════
+
+#include <godot_cpp/classes/node.hpp>
+#include "gl_cast.h"
+#include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/classes/label.hpp>
+#include <godot_cpp/classes/button.hpp>
+#include <godot_cpp/classes/style_box_flat.hpp>
+#include <godot_cpp/classes/style_box_texture.hpp>
+#include <godot_cpp/classes/gradient.hpp>
+#include <godot_cpp/classes/gradient_texture2d.hpp>
+#include <godot_cpp/classes/gradient_texture1_d.hpp>
+#include <godot_cpp/classes/shader.hpp>
+#include <godot_cpp/classes/shader_material.hpp>
+#include <godot_cpp/core/class_db.hpp>
+#include "gl_gui_core.h"
+#include "gl_cola_ui.h"
+#include "gl_runtime.h"   // gl_fire_prop_changed (AbsoluteContentSize)
+#include "../core/gl_autopsia.h"
+
+using namespace godot;
+
+// Varios cambios seguidos piden UN solo _apply diferido, no uno por propiedad:
+// un clon copia todas las propiedades una a una y un script pone Color,
+// Rotation y Offset seguidos. Cada _apply empieza con `_apply_pedido = false`.
+#define GL_APPLY_UNA_VEZ \
+    bool _apply_pedido = false; \
+    void _pedir_apply() { \
+        if (_apply_pedido) return; \
+        _apply_pedido = true; \
+        call_deferred("_apply"); \
+    }
+
+// Re-pinta los modificadores de estilo del control (UICorner/UIStroke/UIGradient)
+// tras reconstruir su StyleBox.
+inline void gl_ui_restyle(Control* c) {
+    if (!c) return;
+    for (int i = 0; i < c->get_child_count(); i++) {
+        Node* ch = c->get_child(i);
+        if (ch && ch->has_method("_apply")) ch->call_deferred("_apply");
+    }
+}
+
+// ── Shader del UIGradient ────────────────────────────────────────────
+//  Por que un shader y no una textura de fondo: la version anterior metia un
+//  StyleBoxTexture en el GuiObject, y eso PISABA la caja plana. Resultado: en
+//  cuanto un elemento tenia UIGradient perdia el redondeo del UICorner, el
+//  borde del UIStroke y su BackgroundColor3. En el place de prueba TODOS los
+//  botones del HUD tienen gradiente, asi que salian planos, cuadrados y blancos.
+//
+//  En Roblox el UIGradient MULTIPLICA el color de fondo, no lo sustituye. Aqui
+//  se hace igual: la caja sigue siendo un StyleBoxFlat (redondeo + borde) y el
+//  shader multiplica lo que se dibuja por el degradado. Asi los tres
+//  modificadores conviven y el orden en que se apliquen deja de importar.
+//
+//  El shader se comparte entre todos (se compila una vez); cada elemento tiene
+//  su ShaderMaterial porque el tamaño del rect es propio.
+inline Ref<Shader>& gl_gradient_shader() {
+    static Ref<Shader> sh;
+    if (sh.is_null()) {
+        sh.instantiate();
+        sh->set_code(
+            "shader_type canvas_item;\n"
+            "render_mode unshaded;\n"
+            "uniform sampler2D grad_tex : source_color, filter_linear, repeat_disable;\n"
+            "uniform vec2 rect_size = vec2(100.0, 100.0);\n"
+            "uniform vec2 grad_dir = vec2(1.0, 0.0);\n"
+            "uniform vec2 grad_off = vec2(0.0, 0.0);\n"
+            "uniform float grad_scale = 1.0;\n"
+            "uniform bool use_grad = false;\n"
+            // Esquinas redondeadas para lo que NO tiene StyleBox (las imagenes):
+            // un TextureRect dibuja pixeles, no un panel, asi que el UICorner no
+            // podia hacer nada con el y las fotos salian siempre cuadradas.
+            "uniform float corner_radius = 0.0;\n"
+            "varying vec2 v_local;\n"
+            "void vertex() { v_local = VERTEX; }\n"
+            "void fragment() {\n"
+            "    vec2 rs = max(rect_size, vec2(1.0));\n"
+            "    if (use_grad) {\n"
+            "        vec2 uv = v_local / rs;\n"
+            "        vec2 d = (uv - vec2(0.5) - grad_off) / max(grad_scale, 0.001);\n"
+            "        float t = clamp(0.5 + dot(d, grad_dir), 0.0, 1.0);\n"
+            "        COLOR *= texture(grad_tex, vec2(t, 0.5));\n"
+            "    }\n"
+            "    if (corner_radius > 0.0) {\n"
+            "        float r = min(corner_radius, min(rs.x, rs.y) * 0.5);\n"
+            "        vec2 q = abs(v_local - rs * 0.5) - (rs * 0.5 - vec2(r));\n"
+            "        float dist = length(max(q, vec2(0.0))) - r;\n"
+            "        COLOR.a *= 1.0 - smoothstep(-0.7, 0.7, dist);\n"
+            "    }\n"
+            "}\n");
+    }
+    return sh;
+}
+// Se suelta al descargar la extension, con el RenderingServer todavia vivo: si
+// no, ~Shader salta cuando ya no hay servidor y su RID (y el CanvasShaderRD
+// compilado) se cuentan como fugados al salir.
+// La variante para un CanvasGroup: el grupo se pinta como una capa (canvas
+// group TRANSPARENT de Godot) y su material es el que la dibuja, asi que primero
+// lee la capa de los hijos (como el shader por defecto de CanvasGroup) y luego
+// le aplica el degradado entero, como hace Roblox. Va aparte porque leer
+// screen_texture obliga a Godot a copiar la pantalla antes de cada elemento.
+inline Ref<Shader>& gl_gradient_shader_grupo_ref() { static Ref<Shader> sh; return sh; }
+inline Ref<Shader>& gl_gradient_shader_grupo() {
+    Ref<Shader>& sh = gl_gradient_shader_grupo_ref();
+    if (sh.is_null()) {
+        sh.instantiate();
+        String codigo = gl_gradient_shader()->get_code();
+        codigo = codigo.replace("uniform bool use_grad = false;\n",
+            "uniform bool use_grad = false;\n"
+            "uniform sampler2D screen_texture : hint_screen_texture, repeat_disable, filter_nearest;\n");
+        codigo = codigo.replace("    vec2 rs = max(rect_size, vec2(1.0));\n",
+            "    vec2 rs = max(rect_size, vec2(1.0));\n"
+            "    vec4 capa = textureLod(screen_texture, SCREEN_UV, 0.0);\n"
+            "    if (capa.a > 0.0001) capa.rgb /= capa.a;\n"
+            "    COLOR *= capa;\n");
+        sh->set_code(codigo);
+    }
+    return sh;
+}
+// Un parametro del material solo si cambia: set_shader_parameter no compara y
+// cada llamada rehace la actualizacion del material en el RenderingServer.
+inline void gl_param(const Ref<ShaderMaterial>& m, const StringName& k, const Variant& v) {
+    if (m->get_shader_parameter(k) != v) m->set_shader_parameter(k, v);
+}
+
+// La textura de un degradado, una por contenido: los UIGradient de una UI
+// repiten mucho la misma secuencia (el brillo de todos los botones), y cada
+// _apply creaba su Gradient y su GradientTexture1D, que se suben a la GPU.
+struct GLDegradado {
+    PackedFloat32Array offsets;
+    PackedColorArray colores;
+    Ref<GradientTexture1D> tex;
+};
+inline HashMap<uint64_t, LocalVector<GLDegradado>>& gl_degradados() {
+    static HashMap<uint64_t, LocalVector<GLDegradado>> c;
+    return c;
+}
+inline Ref<GradientTexture1D> gl_degradado_textura(const PackedFloat32Array& so, const PackedColorArray& cs) {
+    uint64_t h = 1469598103934665603ULL;
+    auto mezclar = [&h](const uint8_t* p, int64_t n) {
+        for (int64_t i = 0; i < n; i++) { h ^= p[i]; h *= 1099511628211ULL; }
+    };
+    mezclar((const uint8_t*)so.ptr(), so.size() * (int64_t)sizeof(float));
+    mezclar((const uint8_t*)cs.ptr(), cs.size() * (int64_t)sizeof(Color));
+    HashMap<uint64_t, LocalVector<GLDegradado>>& c = gl_degradados();
+    if (LocalVector<GLDegradado>* hay = c.getptr(h))
+        for (uint32_t i = 0; i < hay->size(); i++)
+            if ((*hay)[i].offsets == so && (*hay)[i].colores == cs) return (*hay)[i].tex;
+    // Roblox mezcla con gamma 2 (gl_mezcla_gamma2) y el Gradient de Godot en
+    // sRGB entre sus puntos: se le dan los puntos de Roblox mas 15 ya mezclados
+    // dentro de cada tramo. Asi la curva sale como la de Roblox (error por
+    // debajo de un nivel) y un salto duro (dos puntos en el mismo tiempo) sigue
+    // siendo un salto.
+    PackedFloat32Array dso;
+    PackedColorArray dcs;
+    for (int i = 0; i < so.size() && i < cs.size(); i++) {
+        dso.push_back(so[i]);
+        dcs.push_back(cs[i]);
+        if (i + 1 >= so.size() || i + 1 >= cs.size()) continue;
+        const float tramo = so[i + 1] - so[i];
+        if (tramo <= 0.00001f) continue;
+        for (int j = 1; j < 16; j++) {
+            const float a = (float)j / 16.0f;
+            dso.push_back(so[i] + tramo * a);
+            dcs.push_back(gl_mezcla_gamma2(cs[i], cs[i + 1], a));
+        }
+    }
+    Ref<Gradient> grad; grad.instantiate();
+    // OJO: Gradient::set_offsets y set_colors FALLAN si el tamaño no coincide
+    // con el numero de puntos que ya tiene (nace con 2). Si fallan, el
+    // GradientTexture2D genera una imagen VACIA y el hilo de render de Godot
+    // se cae al usarla. Hay que ajustar primero el numero de puntos.
+    while (grad->get_point_count() > (int)dso.size())
+        grad->remove_point(grad->get_point_count() - 1);
+    while (grad->get_point_count() < (int)dso.size())
+        grad->add_point(1.0f, Color(1, 1, 1));
+    grad->set_offsets(dso);
+    grad->set_colors(dcs);
+    Ref<GradientTexture1D> tex; tex.instantiate();
+    tex->set_gradient(grad);
+    tex->set_width(128);
+    // Tope, por si un juego anima los colores: se sueltan las que ya no usa nadie.
+    if (c.size() >= 512) {
+        LocalVector<uint64_t> sobran;
+        for (KeyValue<uint64_t, LocalVector<GLDegradado>>& kv : c) {
+            for (int64_t i = (int64_t)kv.value.size() - 1; i >= 0; i--)
+                if (kv.value[i].tex->get_reference_count() <= 1) kv.value.remove_at(i);
+            if (kv.value.is_empty()) sobran.push_back(kv.key);
+        }
+        for (uint32_t i = 0; i < sobran.size(); i++) c.erase(sobran[i]);
+    }
+    GLDegradado d;
+    d.offsets = so;
+    d.colores = cs;
+    d.tex = tex;
+    c[h].push_back(d);
+    return tex;
+}
+
+inline void gl_clear_gradient_shader() {
+    gl_degradados().clear();
+    gl_gradient_shader_grupo_ref().unref();
+    gl_gradient_shader().unref();
+}
+
+// Pone a un CanvasGroup la variante de shader que le toca: la de capa si su
+// grupo esta activo, la normal si no (anidado). Si el material lo comparte con
+// otro (un Clone), se lo hace propio antes de tocarlo.
+inline void gl_gradiente_para_grupo(Control* c, bool capa) {
+    Ref<ShaderMaterial> m = c->get_material();
+    if (m.is_null()) return;
+    const Ref<Shader> quiere = capa ? gl_gradient_shader_grupo() : gl_gradient_shader();
+    const Ref<Shader> otro   = capa ? gl_gradient_shader() : gl_gradient_shader_grupo();
+    if (m->get_shader() != otro) return;
+    // Una referencia es esta variable y otra la del control: mas, es compartido.
+    if (m->get_reference_count() > 2) { m = m->duplicate(); c->set_material(m); }
+    m->set_shader(quiere);
+}
+
+// El material de efectos de UI de un Control: UIGradient y UICorner escriben
+// en el MISMO ShaderMaterial (cada uno su uniform). Si tuvieran uno cada uno,
+// el segundo en aplicarse le quitaba el efecto al primero.
+inline Ref<ShaderMaterial> gl_gui_material(Control* c) {
+    Ref<ShaderMaterial> m;
+    if (!c) return m;
+    m = c->get_material();
+    if (m.is_valid()) {
+        const Ref<Shader> sh = m->get_shader();
+        if (sh == gl_gradient_shader()) return m;
+        if (sh.is_valid() && sh == gl_gradient_shader_grupo_ref()) return m;
+    }
+    m.instantiate();
+    m->set_shader(gl_gradient_shader());
+    c->set_material(m);
+    // Un CanvasGroup con material se pinta como capa propia (y con su variante).
+    if (c->has_method("_gl_decidir_grupo")) c->call("_gl_decidir_grupo");
+    return m;
+}
+// ¿este Control dibuja una IMAGEN? (TextureRect, o un boton con textura)
+inline bool gl_gui_es_imagen(Control* c) {
+    if (!c) return false;
+    return c->is_class("TextureRect") || c->has_method("set_image");
+}
+
+// ── UICorner ─────────────────────────────────────────────────────────
+//  CornerRadius es un UDim: la escala es relativa a la MITAD del lado corto
+//  del elemento (asi un radio de 0.5 hace una pastilla perfecta).
+class UICorner : public Node {
+    GDCLASS(UICorner, Node);
+    float r_scale = 0.0f;
+    int   r_offset = 8;
+
+    GL_APPLY_UNA_VEZ
+
+    void _apply() {
+        _apply_pedido = false;
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        const Vector2 s = p->get_size();
+        const float lado = MIN(s.x, s.y);
+        // ── LA ESCALA VA SOBRE EL LADO CORTO ENTERO, NO SOBRE SU MITAD ───
+        // Aqui se multiplicaba por `lado * 0.5`, asi que TODO redondeo por
+        // escala salia justo a la mitad de lo que pide Roblox — y 581 de los
+        // 662 UICorner del place son por escala. En Roblox la escala es "el
+        // porcentaje del lado mas corto del padre", y por eso 0.5 deja el
+        // elemento en forma de pastilla; con la formula vieja 0.5 daba un
+        // cuarto del lado y las esquinas casi no se notaban.
+        float radius = r_scale * lado + (float)r_offset;
+        // Roblox tampoco pasa de la pastilla: el tope es medio lado corto.
+        // Solo se recorta si el elemento YA tiene tamaño; si aun mide 0 se deja
+        // el valor pedido y lo arregla el "resized" (que reaplica todos los
+        // modificadores) en cuanto se coloque.
+        if (lado > 0.5f) radius = CLAMP(radius, 0.0f, lado * 0.5f);
+        else if (radius < 0.0f) radius = 0.0f;
+
+        // El StyleBox solo admite enteros: se REDONDEA, no se trunca.
+        const int radio_px = (int)Math::round((double)radius);
+        // Solo las cajas que cambian, y todas en bloque: cada setter de una caja
+        // avisa THEME_CHANGED al control (que rehace su cache de tema y, si es
+        // texto, su forma). En bloque, Godot avisa una vez al final.
+        const StringName* keys = gl_claves_caja();
+        bool en_bloque = false;
+        for (int i = 0; i < 5; i++) {
+            if (!p->has_theme_stylebox_override(keys[i])) continue;
+            const Ref<StyleBoxFlat> actual = p->get_theme_stylebox(keys[i]);
+            if (actual.is_null() || (actual->get_corner_radius(CORNER_TOP_LEFT) == radio_px &&
+                                     actual->get_corner_radius(CORNER_BOTTOM_RIGHT) == radio_px)) continue;
+            if (!en_bloque) { p->begin_bulk_theme_override(); en_bloque = true; }
+            // La caja del control puede ser COMPARTIDA con toda la UI que tenga
+            // ese mismo aspecto. gl_estilo_privado saca una copia para este
+            // elemento antes de tocarla; sin eso, un solo UICorner redondearia
+            // de golpe todas las etiquetas transparentes de la pantalla.
+            Ref<StyleBoxFlat> sb = gl_estilo_privado(p, keys[i]);
+            if (sb.is_valid()) sb->set_corner_radius_all(radio_px);
+        }
+        if (en_bloque) p->end_bulk_theme_override();
+        // Y para lo que dibuja una IMAGEN (ImageLabel/ImageButton), donde no
+        // hay StyleBox que redondear, se recorta por shader — como hace
+        // Roblox, que aplica el UICorner tambien a la foto.
+        if (gl_gui_es_imagen(p)) {
+            Ref<ShaderMaterial> m = gl_gui_material(p);
+            if (m.is_valid()) {
+                // AL SHADER VA EL FLOAT, no el entero. El uniform es float y aqui
+                // llegaba ya truncado: medido en el place, de las 23 imagenes con
+                // UICorner, 5 salian CUADRADAS solo por eso (radios de 0,6 y 0,65
+                // que truncaban a 0) y otras 3 perdian precision (3,2 -> 3).
+                static const StringName k_radio("corner_radius"), k_rect("rect_size");
+                gl_param(m, k_radio, radius);
+                gl_param(m, k_rect, p->get_size());
+            }
+            if (!p->is_connected("resized", Callable(this, "_apply")))
+                p->connect("resized", Callable(this, "_apply"), Object::CONNECT_DEFERRED);
+        }
+    }
+
+protected:
+    // Roblox no pinta el borde de un GuiObject con UICorner (gl_borde_px): al
+    // ponerlo o quitarlo con el padre ya en pantalla, el padre rehace su caja.
+    // Lo que entra de golpe (un clon, lo importado) ya lo ve el padre al entrar.
+    void _notification(int p_what) {
+        if (p_what != NOTIFICATION_PARENTED && p_what != NOTIFICATION_EXIT_TREE) return;
+        Node* p = get_parent();
+        if (!p || !p->is_inside_tree() || !p->has_method("set_border_px")) return;
+        // Siempre, tambien con borde 0: rehacer la caja es lo que quita el
+        // redondeo al borrar el UICorner (con borde 0 se quedaba redondeado).
+        p->call_deferred("set_border_px", (int)p->get("BorderSizePixel"));
+    }
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_CornerRadius", "r"), &UICorner::set_CornerRadius);
+        ClassDB::bind_method(D_METHOD("get_CornerRadius"),      &UICorner::get_CornerRadius);
+        ClassDB::bind_method(D_METHOD("set_gl_udim", "sc", "off"), &UICorner::set_gl_udim);
+        ClassDB::bind_method(D_METHOD("_apply"),                &UICorner::_apply);
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "CornerRadius"), "set_CornerRadius", "get_CornerRadius");
+        // UDim COMPLETO como propiedad de guardado (oculta en el inspector).
+        // Sin ella, duplicate() -- el clon de StarterGui a PlayerGui -- solo
+        // copiaba el entero (el offset) y su setter ponia la ESCALA a 0. En el
+        // place, 581 de los 662 UICorner usan radio por escala (0.1), asi que el
+        // HUD del jugador salia con todas las esquinas cuadradas. Se registra
+        // DESPUES del entero para que gane al restaurar.
+        ClassDB::bind_method(D_METHOD("set_RadiusUDim", "v"), &UICorner::set_RadiusUDim);
+        ClassDB::bind_method(D_METHOD("get_RadiusUDim"),      &UICorner::get_RadiusUDim);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "RadiusUDim", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_STORAGE), "set_RadiusUDim", "get_RadiusUDim");
+    }
+
+public:
+    void set_CornerRadius(int r) { r_scale = 0.0f; r_offset = r; _pedir_apply(); }
+    int  get_CornerRadius() const { return r_offset; }
+    // UDim completo (lo usa el importador y el puente Lua)
+    void set_gl_udim(float sc, int off) { r_scale = sc; r_offset = off; _pedir_apply(); }
+    void set_RadiusUDim(Vector2 v) { r_scale = v.x; r_offset = (int)v.y; _pedir_apply(); }
+    Vector2 get_RadiusUDim() const { return Vector2(r_scale, (float)r_offset); }
+    void _ready() override { _pedir_apply(); }
+    UICorner() { set_meta("_gl_bridge", true); }
+};
+
+// El padding y los layouts se apuntan en su padre al colgarse de el (ver
+// gl_mods_apuntar): asi colocar a un hermano no recorre a todos los demas.
+#define GL_MOD_APUNTAR(tipo)                                                         \
+    void _notification(int p_what) {                                                 \
+        if (p_what == NOTIFICATION_PARENTED)        gl_mods_apuntar(this, tipo, true);  \
+        else if (p_what == NOTIFICATION_UNPARENTED) gl_mods_apuntar(this, tipo, false); \
+    }
+
+// ── UIPadding ────────────────────────────────────────────────────────
+//  SOLO datos: el inset lo aplica cada hijo al colocarse (gl_gui_apply_layout
+//  llama a _gl_pad_px). Antes forzaba el tamaño de todos los hijos y por eso
+//  cualquier panel con UIPadding salia con las UIs amontonadas.
+class UIPadding : public Node {
+    GDCLASS(UIPadding, Node);
+    float sl = 0, st = 0, sr = 0, sb = 0;   // escala (relativa al padre)
+    int   ol = 0, ot = 0, orr = 0, ob = 0;  // offset en px
+
+    void _dirty() {
+        Control* p = gl_cast<Control>(get_parent());
+        if (p) gl_gui_relayout_children(p);
+    }
+
+protected:
+    GL_MOD_APUNTAR(GL_MOD_PADDING)
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_PaddingLeft","v"),   &UIPadding::set_PaddingLeft);
+        ClassDB::bind_method(D_METHOD("get_PaddingLeft"),       &UIPadding::get_PaddingLeft);
+        ClassDB::bind_method(D_METHOD("set_PaddingTop","v"),    &UIPadding::set_PaddingTop);
+        ClassDB::bind_method(D_METHOD("get_PaddingTop"),        &UIPadding::get_PaddingTop);
+        ClassDB::bind_method(D_METHOD("set_PaddingRight","v"),  &UIPadding::set_PaddingRight);
+        ClassDB::bind_method(D_METHOD("get_PaddingRight"),      &UIPadding::get_PaddingRight);
+        ClassDB::bind_method(D_METHOD("set_PaddingBottom","v"), &UIPadding::set_PaddingBottom);
+        ClassDB::bind_method(D_METHOD("get_PaddingBottom"),     &UIPadding::get_PaddingBottom);
+        ClassDB::bind_method(D_METHOD("set_gl_pad","side","sc","off"), &UIPadding::set_gl_pad);
+        ClassDB::bind_method(D_METHOD("_gl_pad_px","parent_size"),     &UIPadding::_gl_pad_px);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"PaddingLeft"),  "set_PaddingLeft",  "get_PaddingLeft");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"PaddingTop"),   "set_PaddingTop",   "get_PaddingTop");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"PaddingRight"), "set_PaddingRight", "get_PaddingRight");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"PaddingBottom"),"set_PaddingBottom","get_PaddingBottom");
+        // UDim COMPLETO como propiedad de guardado (oculta en el inspector).
+        // Sin ella, duplicate() -- el clon de StarterGui a PlayerGui -- solo
+        // copiaba el entero (el offset) y su setter ponia la ESCALA a 0. En el
+        // place, 581 de los 662 UIPadding usan margen por escala (0.1), asi que el
+        // HUD del jugador salia con los margenes a 0. Se registra
+        // DESPUES del entero para que gane al restaurar.
+        ClassDB::bind_method(D_METHOD("set_PadUDim", "v"), &UIPadding::set_PadUDim);
+        ClassDB::bind_method(D_METHOD("get_PadUDim"),      &UIPadding::get_PadUDim);
+        ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "PadUDim", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_STORAGE), "set_PadUDim", "get_PadUDim");
+    }
+
+public:
+    void set_PaddingLeft(int v)   { ol = v;  sl = 0; _dirty(); }
+    int  get_PaddingLeft() const  { return ol; }
+    void set_PaddingTop(int v)    { ot = v;  st = 0; _dirty(); }
+    int  get_PaddingTop() const   { return ot; }
+    void set_PaddingRight(int v)  { orr = v; sr = 0; _dirty(); }
+    int  get_PaddingRight() const { return orr; }
+    void set_PaddingBottom(int v) { ob = v;  sb = 0; _dirty(); }
+    int  get_PaddingBottom() const { return ob; }
+
+    // side: 0=Left 1=Top 2=Right 3=Bottom. UDim completo (escala + offset).
+    void set_gl_pad(int side, float sc, int off) {
+        switch (side) {
+            case 0: sl = sc; ol = off; break;
+            case 1: st = sc; ot = off; break;
+            case 2: sr = sc; orr = off; break;
+            default: sb = sc; ob = off; break;
+        }
+        _dirty();
+    }
+
+    // (escala L,T,R,B + offset L,T,R,B) en un solo array de guardado.
+    void set_PadUDim(PackedFloat32Array v) {
+        if (v.size() != 8) return;
+        sl = v[0]; st = v[1]; sr = v[2]; sb = v[3];
+        ol = (int)v[4]; ot = (int)v[5]; orr = (int)v[6]; ob = (int)v[7];
+        _dirty();
+    }
+    PackedFloat32Array get_PadUDim() const {
+        PackedFloat32Array v;
+        v.push_back(sl); v.push_back(st); v.push_back(sr); v.push_back(sb);
+        v.push_back((float)ol); v.push_back((float)ot);
+        v.push_back((float)orr); v.push_back((float)ob);
+        return v;
+    }
+
+    Vector4 _gl_pad_px(Vector2 psz) const {
+        return Vector4(sl * psz.x + (float)ol,  st * psz.y + (float)ot,
+                       sr * psz.x + (float)orr, sb * psz.y + (float)ob);
+    }
+    void _ready() override { _dirty(); }
+    UIPadding() { set_meta("_gl_bridge", true); }
+};
+
+// ── UIAspectRatioConstraint ──────────────────────────────────────────
+//  SOLO datos. Lo aplica el GuiObject al colocarse.
+//  AspectType: FitWithinMaxSize=0, ScaleWithParentSize=1
+//  DominantAxis: Width=0, Height=1
+class UIAspectRatioConstraint : public Node {
+    GDCLASS(UIAspectRatioConstraint, Node);
+    double ratio = 1.0;
+    int aspect_type = 0;
+    int dominant = 0;   // Width: el de Roblox (Studio, 08/10)
+
+    void _dirty() {
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        // Olvidar la firma ANTES de pedir el relayout: si no, gl_gui_apply_layout
+        // ve las mismas entradas de siempre y se sale sin aplicar la constraint.
+        gl_gui_olvidar_firma(p);
+        if (p->has_method("_on_parent_resized")) p->call_deferred("_on_parent_resized");
+    }
+
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_AspectRatio", "r"), &UIAspectRatioConstraint::set_AspectRatio);
+        ClassDB::bind_method(D_METHOD("get_AspectRatio"),      &UIAspectRatioConstraint::get_AspectRatio);
+        ClassDB::bind_method(D_METHOD("set_AspectType", "v"),  &UIAspectRatioConstraint::set_AspectType);
+        ClassDB::bind_method(D_METHOD("get_AspectType"),       &UIAspectRatioConstraint::get_AspectType);
+        ClassDB::bind_method(D_METHOD("set_DominantAxis", "v"),&UIAspectRatioConstraint::set_DominantAxis);
+        ClassDB::bind_method(D_METHOD("get_DominantAxis"),     &UIAspectRatioConstraint::get_DominantAxis);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "AspectRatio"),  "set_AspectRatio",  "get_AspectRatio");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,   "AspectType"),   "set_AspectType",   "get_AspectType");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,   "DominantAxis"), "set_DominantAxis", "get_DominantAxis");
+    }
+
+public:
+    void   set_AspectRatio(double r) { ratio = r > 0.0001 ? r : 1.0; _dirty(); }
+    double get_AspectRatio() const { return ratio; }
+    void   set_AspectType(int v) { aspect_type = v; _dirty(); }
+    int    get_AspectType() const { return aspect_type; }
+    void   set_DominantAxis(int v) { dominant = v; _dirty(); }
+    int    get_DominantAxis() const { return dominant; }
+    void _ready() override { _dirty(); }
+    UIAspectRatioConstraint() { set_meta("_gl_bridge", true); }
+};
+
+// ── UISizeConstraint ─────────────────────────────────────────────────
+class UISizeConstraint : public Node {
+    GDCLASS(UISizeConstraint, Node);
+    Vector2 min_size = Vector2(0, 0), max_size = Vector2(Math_INF, Math_INF);   // inf, como Roblox
+    void _dirty() {
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        // Olvidar la firma ANTES de pedir el relayout: si no, gl_gui_apply_layout
+        // ve las mismas entradas de siempre y se sale sin aplicar la constraint.
+        gl_gui_olvidar_firma(p);
+        if (p->has_method("_on_parent_resized")) p->call_deferred("_on_parent_resized");
+    }
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_MinSize","v"), &UISizeConstraint::set_MinSize);
+        ClassDB::bind_method(D_METHOD("get_MinSize"),     &UISizeConstraint::get_MinSize);
+        ClassDB::bind_method(D_METHOD("set_MaxSize","v"), &UISizeConstraint::set_MaxSize);
+        ClassDB::bind_method(D_METHOD("get_MaxSize"),     &UISizeConstraint::get_MaxSize);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"MinSize"),"set_MinSize","get_MinSize");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"MaxSize"),"set_MaxSize","get_MaxSize");
+    }
+public:
+    void set_MinSize(Vector2 v) { min_size = v; _dirty(); }
+    Vector2 get_MinSize() const { return min_size; }
+    void set_MaxSize(Vector2 v) { max_size = v; _dirty(); }
+    Vector2 get_MaxSize() const { return max_size; }
+    void _ready() override { _dirty(); }
+    UISizeConstraint() { set_meta("_gl_bridge", true); }
+};
+
+// ── UITextSizeConstraint ─────────────────────────────────────────────
+//  Limita el tamaño de letra que puede elegir TextScaled.
+class UITextSizeConstraint : public Node {
+    GDCLASS(UITextSizeConstraint, Node);
+    int min_text = 1, max_text = 100;
+    void _dirty() {
+        Control* p = gl_cast<Control>(get_parent());
+        if (p && p->has_method("_gl_refit_text")) p->call_deferred("_gl_refit_text");
+    }
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_MinTextSize","v"), &UITextSizeConstraint::set_MinTextSize);
+        ClassDB::bind_method(D_METHOD("get_MinTextSize"),     &UITextSizeConstraint::get_MinTextSize);
+        ClassDB::bind_method(D_METHOD("set_MaxTextSize","v"), &UITextSizeConstraint::set_MaxTextSize);
+        ClassDB::bind_method(D_METHOD("get_MaxTextSize"),     &UITextSizeConstraint::get_MaxTextSize);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"MinTextSize"),"set_MinTextSize","get_MinTextSize");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"MaxTextSize"),"set_MaxTextSize","get_MaxTextSize");
+    }
+public:
+    void set_MinTextSize(int v) { min_text = v; _dirty(); }
+    int  get_MinTextSize() const { return min_text; }
+    void set_MaxTextSize(int v) { max_text = v; _dirty(); }
+    int  get_MaxTextSize() const { return max_text; }
+    void _ready() override { _dirty(); }
+    UITextSizeConstraint() { set_meta("_gl_bridge", true); }
+};
+
+// ── UIScale ──────────────────────────────────────────────────────────
+class UIScale : public Node {
+    GDCLASS(UIScale, Node);
+    double scale = 1.0;
+    GL_APPLY_UNA_VEZ
+
+    void _apply() {
+        _apply_pedido = false;
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        // EL PIVOTE. En Roblox un UIScale escala alrededor del AnchorPoint del
+        // elemento; en Godot, set_scale escala alrededor de pivot_offset, que
+        // nace en (0,0) = esquina superior izquierda. Con el pivote en la
+        // esquina, un boton que crece al pasar el raton se DESPLAZA ademas de
+        // crecer — y si esta en un UIListLayout parece que empuja a los
+        // vecinos. Ese era el bug feo que no pasa en Roblox.
+        Vector2 anclaje(0, 0);
+        if (p->has_method("get_AnchorPoint")) anclaje = p->call("get_AnchorPoint");
+        p->set_pivot_offset(p->get_size() * anclaje);
+        p->set_scale(Vector2((float)scale, (float)scale));
+    }
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_Scale", "s"), &UIScale::set_Scale);
+        ClassDB::bind_method(D_METHOD("get_Scale"),      &UIScale::get_Scale);
+        ClassDB::bind_method(D_METHOD("_apply"),         &UIScale::_apply);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "Scale"), "set_Scale", "get_Scale");
+    }
+public:
+    void   set_Scale(double s) { scale = s; _pedir_apply(); }
+    double get_Scale() const { return scale; }
+    void _ready() override { _pedir_apply(); }
+    UIScale() { set_meta("_gl_bridge", true); }
+};
+
+// ── UIFlexItem ───────────────────────────────────────────────────────
+//  Datos para el reparto de espacio de UIListLayout (HorizontalFlex/VerticalFlex).
+//  FlexMode: None=0, Grow=1, Shrink=2, Fill=3, Custom=4
+class UIFlexItem : public Node {
+    GDCLASS(UIFlexItem, Node);
+    int flex_mode = 0, item_align = 0;
+    double grow = 0.0, shrink = 0.0;
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_FlexMode","v"),  &UIFlexItem::set_FlexMode);
+        ClassDB::bind_method(D_METHOD("get_FlexMode"),      &UIFlexItem::get_FlexMode);
+        ClassDB::bind_method(D_METHOD("set_GrowRatio","v"), &UIFlexItem::set_GrowRatio);
+        ClassDB::bind_method(D_METHOD("get_GrowRatio"),     &UIFlexItem::get_GrowRatio);
+        ClassDB::bind_method(D_METHOD("set_ShrinkRatio","v"), &UIFlexItem::set_ShrinkRatio);
+        ClassDB::bind_method(D_METHOD("get_ShrinkRatio"),     &UIFlexItem::get_ShrinkRatio);
+        ClassDB::bind_method(D_METHOD("set_ItemLineAlignment","v"), &UIFlexItem::set_ItemLineAlignment);
+        ClassDB::bind_method(D_METHOD("get_ItemLineAlignment"),     &UIFlexItem::get_ItemLineAlignment);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "FlexMode"),          "set_FlexMode","get_FlexMode");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"GrowRatio"),         "set_GrowRatio","get_GrowRatio");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"ShrinkRatio"),       "set_ShrinkRatio","get_ShrinkRatio");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "ItemLineAlignment"), "set_ItemLineAlignment","get_ItemLineAlignment");
+    }
+public:
+    void set_FlexMode(int v) { flex_mode = v; }
+    int  get_FlexMode() const { return flex_mode; }
+    void set_GrowRatio(double v) { grow = v; }
+    double get_GrowRatio() const { return grow; }
+    void set_ShrinkRatio(double v) { shrink = v; }
+    double get_ShrinkRatio() const { return shrink; }
+    void set_ItemLineAlignment(int v) { item_align = v; }
+    int  get_ItemLineAlignment() const { return item_align; }
+    UIFlexItem() { set_meta("_gl_bridge", true); }
+};
+
+// ── UIStroke ─────────────────────────────────────────────────────────
+//  En Roblox, un UIStroke sobre un TextLabel/TextButton contornea el TEXTO
+//  (ApplyStrokeMode.Contextual); sobre un Frame contornea el borde. Antes
+//  siempre hacia borde, asi que los textos del juego perdian su contorno y se
+//  volvian ilegibles sobre fondos claros.
+//  ApplyStrokeMode: Contextual=0, Border=1
+class UIStroke : public Node {
+    GDCLASS(UIStroke, Node);
+    double thickness = 1.0;
+    Color  color = Color(0, 0, 0, 1);
+    double transparency = 0.0;
+    bool   enabled = true;
+    int    apply_mode = 0;
+    int    line_join = 0;   // Enum.LineJoinMode: Round=0 (el de Roblox), Bevel=1, Miter=2
+    // Enum.StrokeSizingMode: FixedSize=0 (Thickness en px) o ScaledSize=1
+    // (Thickness es una fraccion del lado corto del padre). Build a Mountain
+    // pasa su HUD a ScaledSize en pantallas pequeñas (Pantalla.lua) y sus
+    // rotulos del mundo lo usan con 0,045: leido como px salia un contorno de
+    // un cuarto de pixel.
+    int    sizing_mode = 0;
+
+    GL_APPLY_UNA_VEZ
+
+    // En ScaledSize el grosor depende del tamaño del padre.
+    void _padre_redimensionado() { if (sizing_mode == 1) _pedir_apply(); }
+
+    void _apply() {
+        _apply_pedido = false;
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        const Vector2 tam = p->get_size();
+        const double grosor_px = sizing_mode == 1 ? thickness * MIN(tam.x, tam.y) : thickness;
+        const float a = 1.0f - (float)Math::clamp(transparency, 0.0, 1.0);
+        const Color col(color.r, color.g, color.b, enabled ? a : 0.0f);
+        const bool is_text = (gl_cast<Label>(p) != nullptr) ||
+                             (gl_cast<Button>(p) != nullptr) ||
+                             (gl_cast<LineEdit>(p) != nullptr);
+        if (is_text && apply_mode == 0) {
+            // El contorno de Godot sale outline_size/4 px por fuera de la letra
+            // (el stroker de FreeType va en 1/64 de px con size*16), y el de
+            // Roblox Thickness px. Con el x2 de antes el contorno de los numeros
+            // del HUD salia a la mitad de grueso que en Roblox (medido: 1,5 px
+            // contra 3).
+            const int px = enabled ? MAX(1, (int)Math::round(grosor_px * 4.0)) : 0;
+            static const StringName k_os("outline_size"), k_sos("shadow_outline_size"), k_col("font_outline_color");
+            // Los tres en bloque y solo si alguno cambia (ver UICorner).
+            const bool cambia = !p->has_theme_constant_override(k_os) || p->get_theme_constant(k_os) != px ||
+                                !p->has_theme_constant_override(k_sos) || p->get_theme_constant(k_sos) != px ||
+                                !p->has_theme_color_override(k_col) || p->get_theme_color(k_col) != col;
+            if (!cambia) return;
+            p->begin_bulk_theme_override();
+            gl_tema_constante(p, k_os, px);
+            gl_tema_constante(p, k_sos, px);
+            gl_tema_color(p, k_col, col);
+            p->end_bulk_theme_override();
+            return;
+        }
+        // Borde: en Roblox el trazo va POR FUERA del marco; el borde de un
+        // StyleBoxFlat va por dentro, asi que se expande la caja lo mismo que el
+        // grosor y el relleno se queda del tamano de siempre.
+        const int grosor = enabled ? MAX(1, (int)Math::round(grosor_px)) : 0;
+        const StringName* keys = gl_claves_caja();
+        bool en_bloque = false;
+        for (int i = 0; i < 5; i++) {
+            if (!p->has_theme_stylebox_override(keys[i])) continue;
+            const Ref<StyleBoxFlat> actual = p->get_theme_stylebox(keys[i]);
+            if (actual.is_null() || (actual->get_border_width(SIDE_LEFT) == grosor &&
+                                     actual->get_border_width(SIDE_BOTTOM) == grosor &&
+                                     actual->get_expand_margin(SIDE_LEFT) == (float)grosor &&
+                                     actual->get_border_color() == col)) continue;
+            if (!en_bloque) { p->begin_bulk_theme_override(); en_bloque = true; }
+            Ref<StyleBoxFlat> sb = gl_estilo_privado(p, keys[i]);   // copia propia, ver UICorner
+            if (sb.is_valid()) {
+                sb->set_border_width_all(grosor);
+                sb->set_expand_margin_all((float)grosor);
+                sb->set_border_color(col);
+            }
+        }
+        if (en_bloque) p->end_bulk_theme_override();
+    }
+
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_Thickness", "t"),    &UIStroke::set_Thickness);
+        ClassDB::bind_method(D_METHOD("get_Thickness"),         &UIStroke::get_Thickness);
+        ClassDB::bind_method(D_METHOD("set_Color", "c"),        &UIStroke::set_Color);
+        ClassDB::bind_method(D_METHOD("get_Color"),             &UIStroke::get_Color);
+        ClassDB::bind_method(D_METHOD("set_Transparency", "v"), &UIStroke::set_Transparency);
+        ClassDB::bind_method(D_METHOD("get_Transparency"),      &UIStroke::get_Transparency);
+        ClassDB::bind_method(D_METHOD("set_Enabled", "v"),      &UIStroke::set_Enabled);
+        ClassDB::bind_method(D_METHOD("get_Enabled"),           &UIStroke::get_Enabled);
+        ClassDB::bind_method(D_METHOD("set_ApplyStrokeMode","v"), &UIStroke::set_ApplyStrokeMode);
+        ClassDB::bind_method(D_METHOD("get_ApplyStrokeMode"),     &UIStroke::get_ApplyStrokeMode);
+        ClassDB::bind_method(D_METHOD("set_LineJoinMode","v"),   &UIStroke::set_LineJoinMode);
+        ClassDB::bind_method(D_METHOD("get_LineJoinMode"),       &UIStroke::get_LineJoinMode);
+        ClassDB::bind_method(D_METHOD("set_StrokeSizingMode","v"), &UIStroke::set_StrokeSizingMode);
+        ClassDB::bind_method(D_METHOD("get_StrokeSizingMode"),     &UIStroke::get_StrokeSizingMode);
+        ClassDB::bind_method(D_METHOD("_apply"),                 &UIStroke::_apply);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "Thickness"),      "set_Thickness", "get_Thickness");
+        ADD_PROPERTY(PropertyInfo(Variant::COLOR, "Color"),          "set_Color",     "get_Color");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "Transparency"),   "set_Transparency","get_Transparency");
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL,  "Enabled"),        "set_Enabled",   "get_Enabled");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,   "ApplyStrokeMode"),"set_ApplyStrokeMode","get_ApplyStrokeMode");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,   "LineJoinMode"),   "set_LineJoinMode","get_LineJoinMode");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,   "StrokeSizingMode"),"set_StrokeSizingMode","get_StrokeSizingMode");
+    }
+    void _notification(int p_what) {
+        // La señal resized del padre, para ScaledSize (ver _padre_redimensionado).
+        if (p_what == NOTIFICATION_ENTER_TREE || p_what == NOTIFICATION_EXIT_TREE) {
+            Control* p = gl_cast<Control>(get_parent());
+            if (!p) return;
+            const Callable cb = callable_mp(this, &UIStroke::_padre_redimensionado);
+            static const StringName k_resized("resized");
+            const bool conectado = p->is_connected(k_resized, cb);
+            if (p_what == NOTIFICATION_ENTER_TREE && !conectado) p->connect(k_resized, cb);
+            else if (p_what == NOTIFICATION_EXIT_TREE && conectado) p->disconnect(k_resized, cb);
+        }
+    }
+
+public:
+    void   set_Thickness(double t) { thickness = t; _pedir_apply(); }
+    double get_Thickness() const { return thickness; }
+    void   set_Color(Color c) { color = c; _pedir_apply(); }
+    Color  get_Color() const { return color; }
+    void   set_Transparency(double v) { transparency = v; _pedir_apply(); }
+    double get_Transparency() const { return transparency; }
+    void   set_Enabled(bool v) { enabled = v; _pedir_apply(); }
+    bool   get_Enabled() const { return enabled; }
+    void   set_ApplyStrokeMode(int v) { apply_mode = v; _pedir_apply(); }
+    int    get_ApplyStrokeMode() const { return apply_mode; }
+    void   set_LineJoinMode(int v) { line_join = v; }
+    int    get_LineJoinMode() const { return line_join; }
+    void   set_StrokeSizingMode(int v) { if (v != sizing_mode) { sizing_mode = v; _pedir_apply(); } }
+    int    get_StrokeSizingMode() const { return sizing_mode; }
+    void _ready() override { _pedir_apply(); }
+    UIStroke() { set_meta("_gl_bridge", true); }
+};
+
+// ── UIGradient ───────────────────────────────────────────────────────
+//  Pinta el fondo del GuiObject padre con el ColorSequence completo (todos
+//  los keypoints, no solo el primero y el ultimo), su Offset, su Rotation y
+//  la Transparency (NumberSequence -> alfa). Limitacion conocida: usa
+//  StyleBoxTexture, que no redondea esquinas, asi que si el mismo elemento
+//  tiene UICorner el gradiente gana y las esquinas salen rectas.
+class UIGradient : public Node {
+    GDCLASS(UIGradient, Node);
+    PackedFloat32Array stops;    // 0..1
+    PackedColorArray   cols;
+    Vector2 offset;
+    double  rotation = 0.0;
+    bool    enabled  = true;
+    double  scale    = 1.0;
+    PackedFloat32Array alpha_stops;   // Transparency (NumberSequence)
+    PackedFloat32Array alpha_vals;
+
+    // Blanco a blanco, el Color de un UIGradient nuevo en Roblox: el que solo
+    // pone Transparency (una mascara de fundido) no oscurece nada. Antes
+    // acababa en gris 0.6 y la mascara ensuciaba lo que tapaba.
+    void _defaults_if_empty() {
+        if (cols.size() >= 2) return;
+        stops.clear(); cols.clear();
+        stops.push_back(0.0f); cols.push_back(Color(1, 1, 1));
+        stops.push_back(1.0f); cols.push_back(Color(1, 1, 1));
+    }
+    // El ColorSequence en t (lineal entre paradas, en sRGB como Roblox).
+    Color _sample_color(float t) const {
+        const int n = cols.size();
+        if (n == 0) return Color(1, 1, 1);
+        if (n != stops.size() || t <= stops[0]) return cols[0];
+        for (int i = 1; i < n; i++) {
+            if (t <= stops[i]) {
+                const float span = stops[i] - stops[i - 1];
+                const float k = span > 0.0001f ? (t - stops[i - 1]) / span : 0.0f;
+                return cols[i - 1].lerp(cols[i], k);
+            }
+        }
+        return cols[n - 1];
+    }
+
+    // El importador deja el ColorSequence como meta "Color": array de
+    // {Color, Time, Envelope}. Aqui se pasa a paradas reales del gradiente.
+    void _adopt_imported_color() {
+        if (!has_meta("Color")) return;
+        Variant v = get_meta("Color");
+        if (v.get_type() != Variant::ARRAY) return;
+        Array kps = v;
+        PackedFloat32Array ns; PackedColorArray nc;
+        for (int i = 0; i < kps.size(); i++) {
+            if (kps[i].get_type() != Variant::DICTIONARY) continue;
+            Dictionary d = kps[i];
+            if (!d.has("Color")) continue;
+            Variant c = d["Color"];
+            if (c.get_type() != Variant::COLOR) continue;
+            float t = d.has("Time") ? (float)d["Time"] : (kps.size() > 1 ? (float)i / (kps.size() - 1) : 0.0f);
+            ns.push_back(Math::clamp(t, 0.0f, 1.0f));
+            nc.push_back(c);
+        }
+        if (nc.size() >= 2) { stops = ns; cols = nc; }
+        // Transparency: el importador la deja como meta (array de keypoints).
+        if (has_meta("Transparency")) {
+            Variant tv = get_meta("Transparency");
+            if (tv.get_type() == Variant::ARRAY) {
+                Array tk = tv;
+                alpha_stops.clear(); alpha_vals.clear();
+                for (int i = 0; i < tk.size(); i++) {
+                    if (tk[i].get_type() != Variant::DICTIONARY) continue;
+                    Dictionary d = tk[i];
+                    if (!d.has("Value")) continue;
+                    alpha_stops.push_back(Math::clamp((float)d.get("Time", 0.0), 0.0f, 1.0f));
+                    alpha_vals.push_back((float)d["Value"]);
+                }
+            }
+        }
+        else if (nc.size() == 1) {
+            stops.clear(); cols.clear();
+            stops.push_back(0.0f); cols.push_back(nc[0]);
+            stops.push_back(1.0f); cols.push_back(nc[0]);
+        }
+    }
+
+    void _gl_sync_size() {
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        static const StringName k_rect("rect_size");
+        Ref<ShaderMaterial> m = p->get_material();
+        if (m.is_valid()) gl_param(m, k_rect, p->get_size());
+    }
+
+    GL_APPLY_UNA_VEZ
+
+    void _apply() {
+        _apply_pedido = false;
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        if (!enabled) {
+            // Al apagarlo hay que QUITAR el material o el degradado se queda.
+            // Apagar el degradado NO puede tirar el material entero: el
+            // UICorner de la misma UI vive en el (comparten shader).
+            Ref<ShaderMaterial> cur = p->get_material();
+            const Ref<Shader> sh = cur.is_valid() ? cur->get_shader() : Ref<Shader>();
+            if (sh.is_valid() && (sh == gl_gradient_shader() || sh == gl_gradient_shader_grupo_ref())) {
+                cur->set_shader_parameter("use_grad", false);
+                // El de un CanvasGroup se queda: es el que pinta su capa.
+                if (sh == gl_gradient_shader() && (float)cur->get_shader_parameter("corner_radius") <= 0.0f)
+                    p->set_material(Ref<Material>());
+            }
+            return;
+        }
+        _defaults_if_empty();
+        if (stops.size() != cols.size() || cols.size() < 2) return;
+        // Las paradas del color y las de la transparencia juntas, ordenadas y
+        // sin repetir: con solo las del color, un Transparency de tres puntos
+        // sobre dos colores (el fundido de una mascara) perdia el del medio.
+        PackedFloat32Array ts;
+        for (int i = 0; i < stops.size(); i++) ts.push_back(Math::clamp(stops[i], 0.0f, 1.0f));
+        const bool con_alfa = !alpha_stops.is_empty() && alpha_stops.size() == alpha_vals.size();
+        if (con_alfa) for (int i = 0; i < alpha_stops.size(); i++) ts.push_back(Math::clamp(alpha_stops[i], 0.0f, 1.0f));
+        ts.sort();
+        PackedFloat32Array so;
+        for (int i = 0; i < ts.size(); i++)
+            if (so.is_empty() || ts[i] - so[so.size() - 1] > 0.00001f) so.push_back(ts[i]);
+        if (so.size() < 2) { so.clear(); so.push_back(0.0f); so.push_back(1.0f); }
+        PackedColorArray cs;
+        for (int i = 0; i < so.size(); i++) {
+            Color c = _sample_color(so[i]);
+            c.a = con_alfa ? 1.0f - Math::clamp(_sample_alpha(so[i]), 0.0f, 1.0f) : 1.0f;
+            cs.push_back(c);
+        }
+        const Ref<GradientTexture1D> tex = gl_degradado_textura(so, cs);
+
+        Ref<ShaderMaterial> mat = gl_gui_material(p);
+        if (mat.is_null()) return;
+        static const StringName k_use("use_grad"), k_tex("grad_tex"), k_dir("grad_dir"),
+                                k_off("grad_off"), k_esc("grad_scale"), k_rect("rect_size");
+        const float rad = (float)Math::deg_to_rad(rotation);
+        gl_param(mat, k_use, true);
+        gl_param(mat, k_tex, tex);
+        gl_param(mat, k_dir, Vector2(Math::cos(rad), Math::sin(rad)));
+        gl_param(mat, k_off, Vector2(Math::clamp(offset.x, -4.0f, 4.0f), Math::clamp(offset.y, -4.0f, 4.0f)));
+        gl_param(mat, k_esc, (float)CLAMP(scale, 0.05, 8.0));
+        gl_param(mat, k_rect, p->get_size());
+        if (p->get_material() != mat) p->set_material(mat);
+        // El tamaño del rect entra como uniform: hay que refrescarlo al cambiar.
+        if (!p->is_connected("resized", Callable(this, "_gl_sync_size")))
+            p->connect("resized", Callable(this, "_gl_sync_size"), Object::CONNECT_DEFERRED);
+    }
+
+    // Muestrea el NumberSequence de Transparency en t (interpolacion lineal).
+    float _sample_alpha(float t) const {
+        const int n = alpha_stops.size();
+        if (n == 0) return 0.0f;
+        if (t <= alpha_stops[0]) return alpha_vals[0];
+        for (int i = 1; i < n; i++) {
+            if (t <= alpha_stops[i]) {
+                const float span = alpha_stops[i] - alpha_stops[i - 1];
+                const float k = span > 0.0001f ? (t - alpha_stops[i - 1]) / span : 0.0f;
+                return alpha_vals[i - 1] + (alpha_vals[i] - alpha_vals[i - 1]) * k;
+            }
+        }
+        return alpha_vals[n - 1];
+    }
+
+protected:
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_Rotation", "r"),     &UIGradient::set_Rotation);
+        ClassDB::bind_method(D_METHOD("get_Rotation"),          &UIGradient::get_Rotation);
+        ClassDB::bind_method(D_METHOD("set_Enabled", "e"),      &UIGradient::set_Enabled);
+        ClassDB::bind_method(D_METHOD("get_Enabled"),           &UIGradient::get_Enabled);
+        ClassDB::bind_method(D_METHOD("set_Offset", "v"),       &UIGradient::set_Offset);
+        ClassDB::bind_method(D_METHOD("get_Offset"),            &UIGradient::get_Offset);
+        ClassDB::bind_method(D_METHOD("set_Scale", "v"),        &UIGradient::set_Scale);
+        ClassDB::bind_method(D_METHOD("get_Scale"),             &UIGradient::get_Scale);
+        ClassDB::bind_method(D_METHOD("set_gl_colors", "a", "b"),      &UIGradient::set_gl_colors);
+        ClassDB::bind_method(D_METHOD("set_gl_stops", "times", "colors"), &UIGradient::set_gl_stops);
+        ClassDB::bind_method(D_METHOD("get_gl_color0"),         &UIGradient::get_gl_color0);
+        ClassDB::bind_method(D_METHOD("get_gl_color1"),         &UIGradient::get_gl_color1);
+        ClassDB::bind_method(D_METHOD("get_gl_times"),          &UIGradient::get_gl_times);
+        ClassDB::bind_method(D_METHOD("get_gl_cols"),           &UIGradient::get_gl_cols);
+        ClassDB::bind_method(D_METHOD("get_gl_alpha_times"),    &UIGradient::get_gl_alpha_times);
+        ClassDB::bind_method(D_METHOD("get_gl_alpha_vals"),     &UIGradient::get_gl_alpha_vals);
+        ClassDB::bind_method(D_METHOD("set_gl_alpha", "times", "vals"), &UIGradient::set_gl_alpha);
+        ClassDB::bind_method(D_METHOD("gl_color_medio"),        &UIGradient::gl_color_medio);
+        ClassDB::bind_method(D_METHOD("_apply"),                &UIGradient::_apply);
+        ClassDB::bind_method(D_METHOD("_gl_sync_size"),         &UIGradient::_gl_sync_size);
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,  "Rotation"), "set_Rotation", "get_Rotation");
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL,   "Enabled"),  "set_Enabled",  "get_Enabled");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2,"Offset"),   "set_Offset",   "get_Offset");
+        ADD_PROPERTY(PropertyInfo(Variant::FLOAT,  "Scale"),    "set_Scale",    "get_Scale");
+    }
+
+public:
+    void   set_Rotation(double r) { rotation = r; _pedir_apply(); }
+    double get_Rotation() const { return rotation; }
+    void   set_Enabled(bool e) { enabled = e; _pedir_apply(); }
+    bool   get_Enabled() const { return enabled; }
+    void   set_Offset(Vector2 v) { offset = v; _pedir_apply(); }
+    Vector2 get_Offset() const { return offset; }
+    void   set_Scale(double v) { scale = v; _pedir_apply(); }
+    double get_Scale() const { return scale; }
+
+    // Lo escrito manda sobre lo importado: se quita el meta para que nadie lo
+    // vuelva a adoptar encima (pero la transparencia importada se conserva).
+    void _soltar_color_importado() {
+        if (!has_meta("Color")) return;
+        if (alpha_stops.is_empty() && has_meta("Transparency")) _adopt_imported_color();
+        remove_meta("Color");
+    }
+    void set_gl_colors(Color a, Color b) {
+        _soltar_color_importado();
+        stops.clear(); cols.clear();
+        stops.push_back(0.0f); cols.push_back(a);
+        stops.push_back(1.0f); cols.push_back(b);
+        _pedir_apply();
+    }
+    void set_gl_stops(PackedFloat32Array times, PackedColorArray colors) {
+        if (times.size() != colors.size() || colors.size() < 2) return;
+        _soltar_color_importado();
+        stops = times; cols = colors;
+        _pedir_apply();
+    }
+    Color get_gl_color0() const { return cols.size() ? cols[0] : Color(1, 1, 1); }
+    Color get_gl_color1() const { return cols.size() ? cols[cols.size() - 1] : Color(1, 1, 1); }
+    // El ColorSequence y el NumberSequence enteros, para el puente de Luau.
+    PackedFloat32Array get_gl_times() { _adoptar_si_falta(); return stops; }
+    PackedColorArray get_gl_cols() { _adoptar_si_falta(); return cols; }
+    PackedFloat32Array get_gl_alpha_times() { _adoptar_si_falta(); return alpha_stops; }
+    PackedFloat32Array get_gl_alpha_vals() { _adoptar_si_falta(); return alpha_vals; }
+    // Lo importado se lee una vez (aun sin _ready, si un script lo lee antes).
+    void _adoptar_si_falta() {
+        if (cols.size() < 2) _adopt_imported_color();
+        _defaults_if_empty();
+    }
+    void set_gl_alpha(PackedFloat32Array times, PackedFloat32Array vals) {
+        if (times.size() != vals.size()) return;
+        // Lo escrito manda sobre lo importado: el meta ya no se vuelve a leer.
+        if (has_meta("Transparency")) remove_meta("Transparency");
+        alpha_stops = times; alpha_vals = vals;
+        _pedir_apply();
+    }
+    // Color medio del degradado (media por tramos). Lo usa el reflejo 3D de los
+    // carteles (gl_world_gui.h), que pinta cada texto de un solo color: sin
+    // esto "BLOCKS" (amarillo), "0% BUILT" (azul) o "FREE GIFT" (verde) de
+    // Build a Mountain salian blancos.
+    Color gl_color_medio() {
+        if (cols.size() < 2 && has_meta("Color")) _adopt_imported_color();
+        if (cols.size() == 0) return Color(1, 1, 1);
+        if (cols.size() == 1 || stops.size() != cols.size()) return cols[0];
+        Color suma(0, 0, 0, 0);
+        float total = 0.0f;
+        for (int i = 1; i < cols.size(); i++) {
+            const float tramo = Math::max(stops[i] - stops[i - 1], 0.0f);
+            suma += (cols[i - 1] + cols[i]) * (0.5f * tramo);
+            total += tramo;
+        }
+        return total > 0.0001f ? suma / total : cols[0];
+    }
+    void _ready() override { _adopt_imported_color(); _pedir_apply(); }
+    UIGradient() { set_meta("_gl_bridge", true); }
+};
+
+// ── UIListLayout ─────────────────────────────────────────────────────
+//  Completo: FillDirection, Padding (UDim), H/V Alignment, SortOrder
+//  (LayoutOrder por defecto, que es lo que el juego usa para ordenar sus
+//  botones), Wraps, ItemLineAlignment y HorizontalFlex/VerticalFlex.
+//  Respeta el UIPadding del mismo contenedor y solo recoloca cuando algo
+//  cambia (antes recolocaba 44 listas por frame).
+class UIListLayout : public Node {
+    GDCLASS(UIListLayout, Node);
+    int   fill_dir = 1;         // Horizontal=0, Vertical=1
+    float pad_scale = 0.0f;
+    int   pad_offset = 0;
+    int   h_align = 1;          // Center=0, Left=1, Right=2
+    int   v_align = 1;          // Center=0, Top=1,  Bottom=2
+    int   sort_order = GL_SORT_NAME;   // Name: el de Instance.new en Roblox
+    bool  wraps = false;
+    int   item_line_align = 0;
+    int   h_flex = 0, v_flex = 0;   // Enum.UIFlexAlignment: None=0, Fill=1, SpaceAround=2, SpaceBetween=3, SpaceEvenly=4
+    uint64_t stamp = 0;
+    Vector2 content_size, avisado;
+    uint32_t turno = gl_gui_layout_turno_nuevo();
+    bool colocando = false;
+
+protected:
+    GL_MOD_APUNTAR(GL_MOD_LAYOUT)
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_FillDirection", "d"), &UIListLayout::set_FillDirection);
+        ClassDB::bind_method(D_METHOD("get_FillDirection"),      &UIListLayout::get_FillDirection);
+        ClassDB::bind_method(D_METHOD("set_Padding", "p"),       &UIListLayout::set_Padding);
+        ClassDB::bind_method(D_METHOD("get_Padding"),            &UIListLayout::get_Padding);
+        ClassDB::bind_method(D_METHOD("set_gl_padding_udim","sc","off"), &UIListLayout::set_gl_padding_udim);
+        ClassDB::bind_method(D_METHOD("set_HorizontalAlignment", "a"), &UIListLayout::set_HorizontalAlignment);
+        ClassDB::bind_method(D_METHOD("get_HorizontalAlignment"),      &UIListLayout::get_HorizontalAlignment);
+        ClassDB::bind_method(D_METHOD("set_VerticalAlignment", "a"),   &UIListLayout::set_VerticalAlignment);
+        ClassDB::bind_method(D_METHOD("get_VerticalAlignment"),        &UIListLayout::get_VerticalAlignment);
+        ClassDB::bind_method(D_METHOD("set_SortOrder", "v"),     &UIListLayout::set_SortOrder);
+        ClassDB::bind_method(D_METHOD("_gl_invalidate"),          &UIListLayout::_gl_invalidate);
+        ClassDB::bind_method(D_METHOD("get_SortOrder"),          &UIListLayout::get_SortOrder);
+        ClassDB::bind_method(D_METHOD("set_Wraps", "v"),         &UIListLayout::set_Wraps);
+        ClassDB::bind_method(D_METHOD("get_Wraps"),              &UIListLayout::get_Wraps);
+        ClassDB::bind_method(D_METHOD("set_ItemLineAlignment","v"), &UIListLayout::set_ItemLineAlignment);
+        ClassDB::bind_method(D_METHOD("get_ItemLineAlignment"),     &UIListLayout::get_ItemLineAlignment);
+        ClassDB::bind_method(D_METHOD("set_HorizontalFlex","v"), &UIListLayout::set_HorizontalFlex);
+        ClassDB::bind_method(D_METHOD("get_HorizontalFlex"),     &UIListLayout::get_HorizontalFlex);
+        ClassDB::bind_method(D_METHOD("set_VerticalFlex","v"),   &UIListLayout::set_VerticalFlex);
+        ClassDB::bind_method(D_METHOD("get_VerticalFlex"),       &UIListLayout::get_VerticalFlex);
+        ClassDB::bind_method(D_METHOD("get_AbsoluteContentSize"), &UIListLayout::get_AbsoluteContentSize);
+        // Solo lectura y sin guardarse en la escena. Sin propiedad registrada el
+        // puente generico no la veia: `layout.AbsoluteContentSize` daba error, y
+        // es justo con lo que todo ScrollingFrame ajusta su CanvasSize.
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "AbsoluteContentSize", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY), "", "get_AbsoluteContentSize");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "FillDirection"),       "set_FillDirection",       "get_FillDirection");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "Padding"),             "set_Padding",             "get_Padding");
+        // UDim completo del Padding, por la misma razon que en UICorner.
+        ClassDB::bind_method(D_METHOD("set_PaddingUDim", "v"), &UIListLayout::set_PaddingUDim);
+        ClassDB::bind_method(D_METHOD("get_PaddingUDim"),      &UIListLayout::get_PaddingUDim);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "PaddingUDim", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_STORAGE), "set_PaddingUDim", "get_PaddingUDim");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "HorizontalAlignment"), "set_HorizontalAlignment", "get_HorizontalAlignment");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "VerticalAlignment"),   "set_VerticalAlignment",   "get_VerticalAlignment");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "SortOrder"),           "set_SortOrder",           "get_SortOrder");
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL, "Wraps"),               "set_Wraps",               "get_Wraps");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "ItemLineAlignment"),   "set_ItemLineAlignment",   "get_ItemLineAlignment");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "HorizontalFlex"),      "set_HorizontalFlex",      "get_HorizontalFlex");
+        ADD_PROPERTY(PropertyInfo(Variant::INT,  "VerticalFlex"),        "set_VerticalFlex",        "get_VerticalFlex");
+    }
+
+public:
+    void set_FillDirection(int d) { fill_dir = d; stamp = 0; }
+    int  get_FillDirection() const { return fill_dir; }
+    void set_Padding(int p) { pad_offset = p; pad_scale = 0.0f; stamp = 0; }
+    int  get_Padding() const { return pad_offset; }
+    void set_gl_padding_udim(float sc, int off) { pad_scale = sc; pad_offset = off; stamp = 0; }
+    void set_PaddingUDim(Vector2 v) { pad_scale = v.x; pad_offset = (int)v.y; stamp = 0; }
+    Vector2 get_PaddingUDim() const { return Vector2(pad_scale, (float)pad_offset); }
+    void set_HorizontalAlignment(int a) { h_align = a; stamp = 0; }
+    int  get_HorizontalAlignment() const { return h_align; }
+    void set_VerticalAlignment(int a) { v_align = a; stamp = 0; }
+    int  get_VerticalAlignment() const { return v_align; }
+    void set_SortOrder(int v) { sort_order = v; stamp = 0; }
+    int  get_SortOrder() const { return sort_order; }
+    void _gl_invalidate() { stamp = 0; }
+    void set_Wraps(bool v) { wraps = v; stamp = 0; }
+    bool get_Wraps() const { return wraps; }
+    void set_ItemLineAlignment(int v) { item_line_align = v; stamp = 0; }
+    int  get_ItemLineAlignment() const { return item_line_align; }
+    void set_HorizontalFlex(int v) { h_flex = v; stamp = 0; }
+    int  get_HorizontalFlex() const { return h_flex; }
+    void set_VerticalFlex(int v) { v_flex = v; stamp = 0; }
+    int  get_VerticalFlex() const { return v_flex; }
+    Vector2 get_AbsoluteContentSize() {
+        if (!colocando) _gl_colocar(true);
+        return content_size;
+    }
+
+    // GetPropertyChangedSignal("AbsoluteContentSize") es con lo que los scripts
+    // ajustan el CanvasSize de su ScrollingFrame: hay que avisar al cambiar
+    // (tambien si lo recoloco una lectura del script).
+    void _process(double) override {
+        _gl_colocar(false);
+        if (content_size != avisado) {
+            avisado = content_size;
+            gl_fire_prop_changed(this, "AbsoluteContentSize");
+            gl_gui_avisar_lienzo(get_parent());   // la barra del ScrollingFrame padre
+        }
+    }
+
+    void _gl_colocar(bool forzar) {
+        GL_AUT_SCOPE(AUT_P_LAYOUT);
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        if (!forzar && !gl_gui_layout_toca(p, turno)) return;
+        const uint64_t now = gl_gui_children_stamp(p);
+        if (now == stamp) return;
+        stamp = now;
+        GLGuiColocando dentro(colocando);
+
+        const Vector4 pad = gl_gui_padding_px(p);
+        const Vector2 psz = gl_gui_contenido_px(p);   // en un ScrollingFrame, el lienzo
+        const Vector2 area(MAX(0.0f, psz.x - (float)pad.x - (float)pad.z),
+                           MAX(0.0f, psz.y - (float)pad.y - (float)pad.w));
+        const float ox = (float)pad.x, oy = (float)pad.y;
+        const bool vert = (fill_dir != 0);
+        const float gap = pad_scale * (vert ? psz.y : psz.x) + (float)pad_offset;
+
+        LocalVector<Control*> kids;
+        gl_gui_sorted_children(p, sort_order, kids);
+        if (kids.is_empty()) { content_size = Vector2(); return; }
+
+        // Reparto por lineas (Wraps). Sin Wraps es una sola linea.
+        const float line_limit = vert ? area.y : area.x;
+        LocalVector<int> line_start; line_start.push_back(0);
+        if (wraps) {
+            float run = 0.0f;
+            for (uint32_t i = 0; i < kids.size(); i++) {
+                const float len = vert ? kids[i]->get_size().y : kids[i]->get_size().x;
+                if (run > 0.0f && run + gap + len > line_limit) {
+                    line_start.push_back((int)i);
+                    run = len;
+                } else {
+                    run += (run > 0.0f ? gap : 0.0f) + len;
+                }
+            }
+        }
+        line_start.push_back((int)kids.size());
+
+        float cross_cursor = 0.0f;
+        float total_main = 0.0f, total_cross = 0.0f;
+        for (uint32_t L = 0; L + 1 < line_start.size(); L++) {
+            const int a = line_start[L], b = line_start[L + 1];
+            float main_len = 0.0f, cross_max = 0.0f;
+            for (int i = a; i < b; i++) {
+                const Vector2 s = kids[i]->get_size();
+                main_len += (vert ? s.y : s.x);
+                cross_max = MAX(cross_max, vert ? s.x : s.y);
+            }
+            const int n = b - a;
+            if (n > 1) main_len += gap * (n - 1);
+
+            // Flex: reparte el hueco sobrante entre los elementos.
+            const int flex = vert ? v_flex : h_flex;
+            float extra_lead = 0.0f, extra_gap = 0.0f;
+            const float slack = line_limit - main_len;
+            if (flex != 0 && slack > 0.0f && n > 0) {
+                if (flex == 3 && n > 1)      extra_gap = slack / (n - 1);          // SpaceBetween
+                else if (flex == 2)          { extra_gap = slack / n; extra_lead = extra_gap * 0.5f; } // SpaceAround
+                else if (flex == 4)          { extra_gap = slack / (n + 1); extra_lead = extra_gap; }  // SpaceEvenly
+            }
+
+            // Alineacion del bloque en el eje principal.
+            float start = extra_lead;
+            if (extra_gap == 0.0f) {
+                const int main_align = vert ? v_align : h_align;
+                start = gl_gui_cross(main_align, line_limit, main_len);
+            }
+
+            float cursor = start;
+            for (int i = a; i < b; i++) {
+                Control* c = kids[i];
+                const Vector2 s = c->get_size();
+                const float item_cross = vert ? s.x : s.y;
+                // ItemLineAlignment: 0=Automatic (usa la del layout), 1=Start,
+                // 2=Center, 3=End, 4=Stretch
+                int cross_align = vert ? h_align : v_align;
+                int ila = item_line_align;
+                if (Node* fi = c->get_node_or_null(NodePath("UIFlexItem")))
+                    if (fi->is_class("UIFlexItem")) ila = (int)(int64_t)fi->get(StringName("ItemLineAlignment"));
+                if (ila == 1) cross_align = vert ? 1 : 1;          // Start = Left/Top
+                else if (ila == 2) cross_align = 0;                 // Center
+                else if (ila == 3) cross_align = 2;                 // End
+                const float cross_off = cross_cursor + gl_gui_cross(cross_align, wraps ? cross_max : (vert ? area.x : area.y), item_cross);
+
+                // EL SCROLL DEL PADRE. Un layout dentro de un ScrollingFrame
+                // colocaba a los hijos en su sitio FIJO, ignorando el
+                // CanvasPosition: la lista de la tienda no se movia con la
+                // rueda por mucho que el canvas cambiara. En Roblox el layout
+                // posiciona DENTRO del canvas, y el canvas es el que se
+                // desplaza — restarlo aqui es el equivalente.
+                const Vector2 scr = gl_gui_scroll_of(p);
+                if (vert) c->set_position(Vector2(ox + cross_off - scr.x, oy + cursor - scr.y));
+                else      c->set_position(Vector2(ox + cursor - scr.x,    oy + cross_off - scr.y));
+                cursor += (vert ? s.y : s.x) + gap + extra_gap;
+            }
+            cross_cursor += cross_max + (wraps ? gap : 0.0f);
+            total_main = MAX(total_main, main_len);
+            total_cross += cross_max + (wraps ? gap : 0.0f);
+        }
+        content_size = vert ? Vector2(total_cross, total_main) : Vector2(total_main, total_cross);
+    }
+
+    UIListLayout() { set_meta("_gl_bridge", true); set_process(true); }
+};
+
+// ── UIGridLayout ─────────────────────────────────────────────────────
+//  CellSize y CellPadding son UDim2 (relativos al contenedor), con
+//  FillDirection, FillDirectionMaxCells, StartCorner, SortOrder y alineacion.
+class UIGridLayout : public Node {
+    GDCLASS(UIGridLayout, Node);
+    GuiUDim2 cell = {0, 100, 0, 100};
+    GuiUDim2 cpad = {0, 5, 0, 5};
+    int fill_dir = 0;            // Horizontal=0, Vertical=1
+    int max_cells = 0;           // 0 = sin limite
+    int start_corner = 0;        // TopLeft=0, TopRight=1, BottomLeft=2, BottomRight=3
+    int sort_order = GL_SORT_NAME;   // Name: el de Instance.new en Roblox
+    int h_align = 1, v_align = 1;
+    uint64_t stamp = 0;
+    uint32_t turno = gl_gui_layout_turno_nuevo();
+    bool colocando = false;
+    Vector2 avisado;
+    Vector2 content_size;   // en pixeles (antes guardaba las celdas por linea y lineas)
+    Vector2 cell_count;     // columnas, filas
+    Vector2 cell_px;        // tamaño real de una celda
+
+protected:
+    GL_MOD_APUNTAR(GL_MOD_LAYOUT)
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("get_AbsoluteContentSize"), &UIGridLayout::get_AbsoluteContentSize);
+        ClassDB::bind_method(D_METHOD("get_AbsoluteCellSize"),    &UIGridLayout::get_AbsoluteCellSize);
+        ClassDB::bind_method(D_METHOD("get_AbsoluteCellCount"),   &UIGridLayout::get_AbsoluteCellCount);
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "AbsoluteContentSize", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY), "", "get_AbsoluteContentSize");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "AbsoluteCellSize", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY), "", "get_AbsoluteCellSize");
+        ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "AbsoluteCellCount", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY), "", "get_AbsoluteCellCount");
+        ClassDB::bind_method(D_METHOD("set_CellSizeX", "v"),   &UIGridLayout::set_CellSizeX);
+        ClassDB::bind_method(D_METHOD("get_CellSizeX"),        &UIGridLayout::get_CellSizeX);
+        ClassDB::bind_method(D_METHOD("set_CellSizeY", "v"),   &UIGridLayout::set_CellSizeY);
+        ClassDB::bind_method(D_METHOD("get_CellSizeY"),        &UIGridLayout::get_CellSizeY);
+        ClassDB::bind_method(D_METHOD("set_CellPadding", "v"), &UIGridLayout::set_CellPadding);
+        ClassDB::bind_method(D_METHOD("get_CellPadding"),      &UIGridLayout::get_CellPadding);
+        ClassDB::bind_method(D_METHOD("set_gl_cell_size","xs","xo","ys","yo"),    &UIGridLayout::set_gl_cell_size);
+        ClassDB::bind_method(D_METHOD("set_gl_cell_padding","xs","xo","ys","yo"), &UIGridLayout::set_gl_cell_padding);
+        ClassDB::bind_method(D_METHOD("set_FillDirection","v"), &UIGridLayout::set_FillDirection);
+        ClassDB::bind_method(D_METHOD("get_FillDirection"),     &UIGridLayout::get_FillDirection);
+        ClassDB::bind_method(D_METHOD("set_FillDirectionMaxCells","v"), &UIGridLayout::set_FillDirectionMaxCells);
+        ClassDB::bind_method(D_METHOD("get_FillDirectionMaxCells"),     &UIGridLayout::get_FillDirectionMaxCells);
+        ClassDB::bind_method(D_METHOD("set_StartCorner","v"),   &UIGridLayout::set_StartCorner);
+        ClassDB::bind_method(D_METHOD("get_StartCorner"),       &UIGridLayout::get_StartCorner);
+        ClassDB::bind_method(D_METHOD("set_SortOrder","v"),     &UIGridLayout::set_SortOrder);
+        ClassDB::bind_method(D_METHOD("_gl_invalidate"),         &UIGridLayout::_gl_invalidate);
+        ClassDB::bind_method(D_METHOD("get_SortOrder"),         &UIGridLayout::get_SortOrder);
+        ClassDB::bind_method(D_METHOD("set_HorizontalAlignment","v"), &UIGridLayout::set_HorizontalAlignment);
+        ClassDB::bind_method(D_METHOD("get_HorizontalAlignment"),     &UIGridLayout::get_HorizontalAlignment);
+        ClassDB::bind_method(D_METHOD("set_VerticalAlignment","v"),   &UIGridLayout::set_VerticalAlignment);
+        ClassDB::bind_method(D_METHOD("get_VerticalAlignment"),       &UIGridLayout::get_VerticalAlignment);
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "CellSizeX"),   "set_CellSizeX",   "get_CellSizeX");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "CellSizeY"),   "set_CellSizeY",   "get_CellSizeY");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "CellPadding"), "set_CellPadding", "get_CellPadding");
+        // CellSize/CellPadding son UDim2: se guardan enteros para que el clon
+        // no los pierda (los enteros solos borraban la escala).
+        ClassDB::bind_method(D_METHOD("set_CellUDim2", "v"), &UIGridLayout::set_CellUDim2);
+        ClassDB::bind_method(D_METHOD("get_CellUDim2"),      &UIGridLayout::get_CellUDim2);
+        ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "CellUDim2", PROPERTY_HINT_NONE, "",
+                                  PROPERTY_USAGE_STORAGE), "set_CellUDim2", "get_CellUDim2");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "FillDirection"),         "set_FillDirection","get_FillDirection");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "FillDirectionMaxCells"), "set_FillDirectionMaxCells","get_FillDirectionMaxCells");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "StartCorner"),           "set_StartCorner","get_StartCorner");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "SortOrder"),             "set_SortOrder","get_SortOrder");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "HorizontalAlignment"),   "set_HorizontalAlignment","get_HorizontalAlignment");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "VerticalAlignment"),     "set_VerticalAlignment","get_VerticalAlignment");
+    }
+
+public:
+    void set_CellSizeX(int v) { cell.xs = 0; cell.xo = (float)v; stamp = 0; }
+    int  get_CellSizeX() const { return (int)cell.xo; }
+    void set_CellSizeY(int v) { cell.ys = 0; cell.yo = (float)v; stamp = 0; }
+    int  get_CellSizeY() const { return (int)cell.yo; }
+    void set_CellPadding(int v) { cpad = {0, (float)v, 0, (float)v}; stamp = 0; }
+    int  get_CellPadding() const { return (int)cpad.xo; }
+    void set_gl_cell_size(float xs, float xo, float ys, float yo)    { cell = {xs, xo, ys, yo}; stamp = 0; }
+    void set_gl_cell_padding(float xs, float xo, float ys, float yo) { cpad = {xs, xo, ys, yo}; stamp = 0; }
+    void set_CellUDim2(PackedFloat32Array v) {
+        if (v.size() != 8) return;
+        cell = {v[0], v[1], v[2], v[3]};
+        cpad = {v[4], v[5], v[6], v[7]};
+        stamp = 0;
+    }
+    PackedFloat32Array get_CellUDim2() const {
+        PackedFloat32Array v;
+        v.push_back(cell.xs); v.push_back(cell.xo); v.push_back(cell.ys); v.push_back(cell.yo);
+        v.push_back(cpad.xs); v.push_back(cpad.xo); v.push_back(cpad.ys); v.push_back(cpad.yo);
+        return v;
+    }
+    void set_FillDirection(int v) { fill_dir = v; stamp = 0; }
+    int  get_FillDirection() const { return fill_dir; }
+    void set_FillDirectionMaxCells(int v) { max_cells = v; stamp = 0; }
+    int  get_FillDirectionMaxCells() const { return max_cells; }
+    void set_StartCorner(int v) { start_corner = v; stamp = 0; }
+    int  get_StartCorner() const { return start_corner; }
+    void set_SortOrder(int v) { sort_order = v; stamp = 0; }
+    int  get_SortOrder() const { return sort_order; }
+    void _gl_invalidate() { stamp = 0; }
+    void set_HorizontalAlignment(int v) { h_align = v; stamp = 0; }
+    int  get_HorizontalAlignment() const { return h_align; }
+    void set_VerticalAlignment(int v) { v_align = v; stamp = 0; }
+    int  get_VerticalAlignment() const { return v_align; }
+    Vector2 get_AbsoluteCellCount()   { if (!colocando) _gl_colocar(true); return cell_count; }
+    Vector2 get_AbsoluteContentSize() { if (!colocando) _gl_colocar(true); return content_size; }
+    Vector2 get_AbsoluteCellSize()    { if (!colocando) _gl_colocar(true); return cell_px; }
+
+    void _process(double) override {
+        _gl_colocar(false);
+        if (content_size != avisado) {
+            avisado = content_size;
+            gl_fire_prop_changed(this, "AbsoluteContentSize");
+            gl_gui_avisar_lienzo(get_parent());   // la barra del ScrollingFrame padre
+        }
+    }
+
+    void _gl_colocar(bool forzar) {
+        GL_AUT_SCOPE(AUT_P_LAYOUT);
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        if (!forzar && !gl_gui_layout_toca(p, turno)) return;
+        const uint64_t now = gl_gui_children_stamp(p);
+        if (now == stamp) return;
+        stamp = now;
+        GLGuiColocando dentro(colocando);
+
+        const Vector4 pad = gl_gui_padding_px(p);
+        const Vector2 psz = gl_gui_contenido_px(p);   // en un ScrollingFrame, el lienzo
+        const Vector2 area(MAX(0.0f, psz.x - (float)pad.x - (float)pad.z),
+                           MAX(0.0f, psz.y - (float)pad.y - (float)pad.w));
+        const Vector2 cs(cell.xs * area.x + cell.xo, cell.ys * area.y + cell.yo);
+        const Vector2 cp(cpad.xs * area.x + cpad.xo, cpad.ys * area.y + cpad.yo);
+
+        LocalVector<Control*> kids;
+        gl_gui_sorted_children(p, sort_order, kids);
+        cell_px = cs;
+        if (kids.is_empty()) { content_size = Vector2(); cell_count = Vector2(); return; }
+
+        // Celdas por linea en la direccion de llenado.
+        int per_line;
+        if (max_cells > 0) per_line = max_cells;
+        else {
+            const float span = (fill_dir == 0) ? area.x : area.y;
+            const float step = ((fill_dir == 0) ? cs.x : cs.y) + ((fill_dir == 0) ? cp.x : cp.y);
+            per_line = step > 0.01f ? (int)Math::floor((span + ((fill_dir == 0) ? cp.x : cp.y)) / step) : 1;
+        }
+        if (per_line < 1) per_line = 1;
+
+        const int lines = ((int)kids.size() + per_line - 1) / per_line;
+        const float grid_w = (fill_dir == 0)
+            ? per_line * cs.x + (per_line - 1) * cp.x
+            : lines * cs.x + (lines - 1) * cp.x;
+        const float grid_h = (fill_dir == 0)
+            ? lines * cs.y + (lines - 1) * cp.y
+            : per_line * cs.y + (per_line - 1) * cp.y;
+        const float base_x = (float)pad.x + gl_gui_cross(h_align, area.x, grid_w);
+        const float base_y = (float)pad.y + gl_gui_cross(v_align, area.y, grid_h);
+
+        for (uint32_t i = 0; i < kids.size(); i++) {
+            int col, row;
+            if (fill_dir == 0) { col = (int)i % per_line; row = (int)i / per_line; }
+            else               { row = (int)i % per_line; col = (int)i / per_line; }
+            // StartCorner: espeja la rejilla.
+            const int ncols = (fill_dir == 0) ? per_line : lines;
+            const int nrows = (fill_dir == 0) ? lines : per_line;
+            if (start_corner == 1 || start_corner == 3) col = ncols - 1 - col;
+            if (start_corner == 2 || start_corner == 3) row = nrows - 1 - row;
+            const Vector2 scr = gl_gui_scroll_of(p);   // canvas del ScrollingFrame
+            kids[i]->set_position(Vector2(base_x + col * (cs.x + cp.x) - scr.x,
+                                          base_y + row * (cs.y + cp.y) - scr.y));
+            kids[i]->set_size(cs);
+        }
+        content_size = Vector2(grid_w, grid_h);
+        cell_count = (fill_dir == 0) ? Vector2((float)per_line, (float)lines)
+                                     : Vector2((float)lines, (float)per_line);
+    }
+
+    UIGridLayout() { set_meta("_gl_bridge", true); set_process(true); }
+};
+
+// ── UIPageLayout ─────────────────────────────────────────────────────
+//  Solo toca la visibilidad cuando el juego cambia de pagina de verdad; antes
+//  la forzaba cada frame y hacia aparecer paneles que estaban guardados.
+class UIPageLayout : public Node {
+    GDCLASS(UIPageLayout, Node);
+    int page = -1;
+    int applied = -2;
+protected:
+    GL_MOD_APUNTAR(GL_MOD_LAYOUT)
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_CurrentPage","v"), &UIPageLayout::set_CurrentPage);
+        ClassDB::bind_method(D_METHOD("get_CurrentPage"),     &UIPageLayout::get_CurrentPage);
+        ADD_PROPERTY(PropertyInfo(Variant::INT,"CurrentPage"),"set_CurrentPage","get_CurrentPage");
+    }
+public:
+    void set_CurrentPage(int v) { page = v; }
+    int  get_CurrentPage() const { return page; }
+    void _process(double) override {
+        if (page < 0 || page == applied) return;
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p) return;
+        applied = page;
+        int idx = 0;
+        for (int i = 0; i < p->get_child_count(); i++) {
+            Control* c = gl_cast<Control>(p->get_child(i));
+            if (!c) continue;
+            c->set_visible(idx == page);
+            idx++;
+        }
+    }
+    UIPageLayout() { set_meta("_gl_bridge", true); set_process(true); }
+};
+
+// ── UITableLayout ────────────────────────────────────────────────────
+//  Filas = hijos del contenedor; columnas = hijos de cada fila.
+class UITableLayout : public Node {
+    GDCLASS(UITableLayout, Node);
+    bool fill_empty = false;
+    int  major_axis = 0;        // FillDirection: Rows=0, Columns=1
+    int  sort_order = GL_SORT_NAME;   // Name: el de Instance.new en Roblox
+    GuiUDim2 cpad = {0, 0, 0, 0};
+    uint64_t stamp = 0;
+    uint32_t turno = gl_gui_layout_turno_nuevo();
+protected:
+    GL_MOD_APUNTAR(GL_MOD_LAYOUT)
+    static void _bind_methods() {
+        ClassDB::bind_method(D_METHOD("set_FillEmptySpaceColumns","v"), &UITableLayout::set_FillEmptySpaceColumns);
+        ClassDB::bind_method(D_METHOD("get_FillEmptySpaceColumns"),     &UITableLayout::get_FillEmptySpaceColumns);
+        ClassDB::bind_method(D_METHOD("set_MajorAxis","v"), &UITableLayout::set_MajorAxis);
+        ClassDB::bind_method(D_METHOD("get_MajorAxis"),     &UITableLayout::get_MajorAxis);
+        ClassDB::bind_method(D_METHOD("set_SortOrder","v"), &UITableLayout::set_SortOrder);
+        ClassDB::bind_method(D_METHOD("_gl_invalidate"),     &UITableLayout::_gl_invalidate);
+        ClassDB::bind_method(D_METHOD("get_SortOrder"),     &UITableLayout::get_SortOrder);
+        ClassDB::bind_method(D_METHOD("set_gl_cell_padding","xs","xo","ys","yo"), &UITableLayout::set_gl_cell_padding);
+        ADD_PROPERTY(PropertyInfo(Variant::BOOL,"FillEmptySpaceColumns"),"set_FillEmptySpaceColumns","get_FillEmptySpaceColumns");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "MajorAxis"),"set_MajorAxis","get_MajorAxis");
+        ADD_PROPERTY(PropertyInfo(Variant::INT, "SortOrder"),"set_SortOrder","get_SortOrder");
+    }
+public:
+    void set_FillEmptySpaceColumns(bool v) { fill_empty = v; stamp = 0; }
+    bool get_FillEmptySpaceColumns() const { return fill_empty; }
+    void set_MajorAxis(int v) { major_axis = v; stamp = 0; }
+    int  get_MajorAxis() const { return major_axis; }
+    void set_SortOrder(int v) { sort_order = v; stamp = 0; }
+    int  get_SortOrder() const { return sort_order; }
+    void _gl_invalidate() { stamp = 0; }
+    void set_gl_cell_padding(float xs, float xo, float ys, float yo) { cpad = {xs, xo, ys, yo}; stamp = 0; }
+
+    void _process(double) override {
+        GL_AUT_SCOPE(AUT_P_LAYOUT);
+        Control* p = gl_cast<Control>(get_parent());
+        if (!p || !gl_gui_layout_toca(p, turno)) return;
+        const uint64_t now = gl_gui_children_stamp(p);
+        if (now == stamp) return;
+        stamp = now;
+        const Vector4 pad = gl_gui_padding_px(p);
+        const Vector2 psz = gl_gui_contenido_px(p);   // en un ScrollingFrame, el lienzo
+        const Vector2 cp(cpad.xs * psz.x + cpad.xo, cpad.ys * psz.y + cpad.yo);
+        LocalVector<Control*> rows;
+        gl_gui_sorted_children(p, sort_order, rows);
+        float y = (float)pad.y;
+        for (uint32_t r = 0; r < rows.size(); r++) {
+            Control* row = rows[r];
+            const Vector2 scr = gl_gui_scroll_of(p);
+            row->set_position(Vector2((float)pad.x - scr.x, y - scr.y));
+            LocalVector<Control*> cells;
+            gl_gui_sorted_children(row, sort_order, cells);
+            float x = 0.0f, hmax = row->get_size().y;
+            for (uint32_t c = 0; c < cells.size(); c++) {
+                cells[c]->set_position(Vector2(x, 0));
+                x += cells[c]->get_size().x + cp.x;
+                hmax = MAX(hmax, cells[c]->get_size().y);
+            }
+            y += hmax + cp.y;
+        }
+    }
+    UITableLayout() { set_meta("_gl_bridge", true); set_process(true); }
+};
+
+inline void gl_register_ui_modifier_classes() {
+    ClassDB::register_class<UICorner>();
+    ClassDB::register_class<UIPadding>();
+    ClassDB::register_class<UIAspectRatioConstraint>();
+    ClassDB::register_class<UISizeConstraint>();
+    ClassDB::register_class<UITextSizeConstraint>();
+    ClassDB::register_class<UIScale>();
+    ClassDB::register_class<UIFlexItem>();
+    ClassDB::register_class<UIStroke>();
+    ClassDB::register_class<UIGradient>();
+    ClassDB::register_class<UIListLayout>();
+    ClassDB::register_class<UIGridLayout>();
+    ClassDB::register_class<UIPageLayout>();
+    ClassDB::register_class<UITableLayout>();
+}
+
+#endif // GL_UI_MODIFIERS_H
