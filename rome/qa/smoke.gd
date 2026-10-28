@@ -41,8 +41,9 @@ func _run() -> void:
 	if not _check(output != null and output.default_slot == EditorDock.DOCK_SLOT_BOTTOM and not bottom_panels.is_empty() and bottom_panels[0].is_ancestor_of(output), "Console is docked below the world"):
 		return
 	var console_banner := false
+	var version := str(ROMEUpdateManager.get_singleton().get_status().get("current_rome_version", ""))
 	for text: RichTextLabel in output.find_children("*", "RichTextLabel", true, false):
-		if text.get_parsed_text().contains("ROME Engine 0.1.0-alpha.1 X Godot Luau | Rocket Meteor"):
+		if text.get_parsed_text().contains("ROME Engine " + version + " X Godot Luau | Rocket Meteor"):
 			console_banner = true
 	if not _check(console_banner, "Console starts with ROME and Godot Luau branding"):
 		return

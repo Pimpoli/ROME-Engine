@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Existing GitHub release tag receiving the verified Linux asset
         required: true
-        default: v0.1.0-alpha.1
+        default: v0.1.0-alpha.2
         type: string
       source_ref:
         description: Source commit or branch (empty builds this workflow's commit)

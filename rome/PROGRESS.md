@@ -251,8 +251,12 @@ Release procedure (do not publish until the owner asks): raise `ROME_VERSION` in
 standalone with `rome/package_standalone.py`, run
 `python rome/qa/updater/probar_paquete.py --autonomo <exe>`, then publish a
 non-draft prerelease whose asset is `ROME-Studio-<version>-windows-x86_64.exe`
-with the notes in the body. The GitHub API currently lists no public release,
-and 0.1.0-alpha.1 has no updater, so its users download the next one manually.
+with the notes in the body. The updater shows the body as plain text, so the notes
+avoid Markdown markup. GitHub's API gives each asset a `digest` (`sha256:…`), which
+the updater requires. 0.1.0-alpha.2 is the first release with the updater;
+0.1.0-alpha.1 stayed a draft without one, so anyone holding it downloads
+alpha.2 manually once. Linux assets come from the manual `rome-release.yml`
+workflow (release tag input) once the release exists.
 
 Experiences update themselves (`RomeProjectTemplate::update_project`, called in
 `Main::setup` right before `register_core_extensions()`, the last moment the

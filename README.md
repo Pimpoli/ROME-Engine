@@ -2,7 +2,7 @@
   <img src="rome/assets/branding/rome-engine.png" alt="ROME Engine" width="300">
 </p>
 
-# ROME Engine · 0.1.0-alpha.1
+# ROME Engine · 0.1.0-alpha.2
 
 **Rocket Meteor Engine** es un motor experimental basado en Godot, con un editor
 inspirado en el flujo de trabajo de Roblox Studio y programación en Luau mediante
@@ -10,7 +10,7 @@ inspirado en el flujo de trabajo de Roblox Studio y programación en Luau median
 
 ## Descargar la alpha
 
-[**ROME Engine 0.1.0-alpha.1 — descargas y notas de la versión**](https://github.com/Pimpoli/ROME-Engine/releases/tag/v0.1.0-alpha.1)
+[**ROME Engine 0.1.0-alpha.2 — descargas y notas de la versión**](https://github.com/Pimpoli/ROME-Engine/releases/tag/v0.1.0-alpha.2)
 
 Los archivos se encuentran en **Assets** de esa versión. Esta es una
 **pre-release**: utiliza el enlace anterior para encontrarla, ya que GitHub puede
@@ -35,13 +35,13 @@ copia. Este paquete no utiliza un asistente de instalación.
 
 ### Actualizaciones
 
-A partir de la versión siguiente a la 0.1.0-alpha.1, ROME se actualiza solo:
-al arrancar consulta las versiones publicadas en Releases, descarga en segundo
-plano el ejecutable de tu plataforma y comprueba su SHA-256. La versión nueva se
-instala al cerrar el editor, o al momento con **Ayuda > Actualizaciones de ROME >
-Actualizar y reiniciar**, que reabre la misma experiencia. Si algo falla, ROME
-vuelve a abrir la versión anterior. Quien tenga la 0.1.0-alpha.1 descarga la
-siguiente a mano una sola vez.
+Desde la 0.1.0-alpha.2, ROME se actualiza solo: al arrancar consulta las
+versiones publicadas en Releases, descarga en segundo plano el ejecutable de tu
+plataforma y comprueba su SHA-256. La versión nueva se instala al cerrar el
+editor, o al momento con **Ayuda > Actualizaciones de ROME > Actualizar y
+reiniciar**, que reabre la misma experiencia. Si algo falla, ROME vuelve a abrir
+la versión anterior. La 0.1.0-alpha.1 no traía actualizador: quien la tenga
+descarga esta versión a mano una sola vez.
 
 GodotLuau viaja dentro de ROME y se actualiza con él; su actualizador propio
 queda desactivado en las experiencias de ROME para no instalar una compilación
@@ -64,7 +64,7 @@ actual es **Godot 4.8 beta 1**, commit
 Las actualizaciones de esa base se integran y prueban en este fork; no se aplican
 automáticamente.
 
-**0.1.0-alpha.1 es la versión pública de ROME**; 4.8 beta 1 identifica la base
+**0.1.0-alpha.2 es la versión pública de ROME**; 4.8 beta 1 identifica la base
 técnica de Godot. El repositorio publica una instantánea del código derivado y
 no está registrado como fork en la red de repositorios de GitHub. El origen y
 el proceso para integrar cambios del núcleo se documentan en [UPSTREAM.md](rome/UPSTREAM.md).
@@ -184,11 +184,12 @@ al empaquetar, se genera `ROME Studio Preview.exe` como alternativa.
 Para crear el archivo autónomo que incorpora esos componentes:
 
 ```powershell
-python rome/package_standalone.py --editor ./bin/godot.windows.editor.x86_64.exe --runtime ./bin/rome_runtime --output ./bin/ROME-Engine-0.1.0-alpha.1-windows-x86_64.exe
+python rome/package_standalone.py --editor ./bin/godot.windows.editor.x86_64.exe --runtime ./bin/rome_runtime --output ./bin/ROME-Studio-0.1.0-alpha.2-windows-x86_64.exe
 ```
 
-El nombre de salida del ejemplo es libre. La herramienta también escribe su
-archivo de verificación SHA-256. El paquete autónomo extrae el runtime a la caché
+El nombre de salida es libre, pero si sigue el formato de las versiones debe
+llevar la versión compilada; es el nombre que busca el actualizador en Releases.
+La herramienta también escribe su archivo de verificación SHA-256. El paquete autónomo extrae el runtime a la caché
 del usuario al iniciarse, por lo que puede distribuirse sin una carpeta vecina.
 
 ### Actualizar únicamente ROME
