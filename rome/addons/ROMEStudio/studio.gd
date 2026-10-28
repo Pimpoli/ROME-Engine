@@ -1,83 +1,56 @@
 @tool
 extends EditorPlugin
 
+const Catalog = preload("res://addons/ROMEStudio/studio_catalog.gd")
+const Placement = preload("res://addons/ROMEStudio/studio_placement.gd")
+const InsertDialog = preload("res://addons/ROMEStudio/studio_insert_dialog.gd")
+const Services = preload("res://addons/ROMEStudio/studio_services.gd")
+# Ribbon material menu order: Plastic, Wood, Metal, Concrete, Glass, Neon, Grass.
+const MATERIALS := [0, 3, 10, 7, 16, 2, 14]
+# Studio sizes for Block, Ball, Cylinder, Wedge, CornerWedge and Truss.
+const PART_SIZES := [Vector3(4, 1, 2), Vector3(2, 2, 2), Vector3(2, 2, 2), Vector3(4, 1, 2), Vector3(2, 2, 2), Vector3(2, 2, 2)]
+const STORAGE := ["ReplicatedStorage", "ServerStorage", "ReplicatedFirst", "StarterPack"]
+
 var _editor_node: Node
 var _pending_root: Node
-var _picker: ConfirmationDialog
-var _picker_search: LineEdit
-var _picker_list: ItemList
+var _picker: InsertDialog
 var _studio_inspector: EditorInspectorPlugin
 var _view_initialized := false
 var _resources: EditorDock
-var _services := preload("res://addons/ROMEStudio/studio_services.gd").new()
+var _services := Services.new()
 var _script_files := preload("res://addons/ROMEStudio/studio_script_files.gd").new()
-
-const OBJECTS := {
-	"Part": "Part", "Model": "RBXModel", "Folder": "Folder", "SpawnLocation": "SpawnLocation",
-	"Script": "ServerScript", "LocalScript": "LocalScript", "ModuleScript": "ModuleScript",
-	"ScreenGui": "ScreenGui", "Frame": "Frame", "ScrollingFrame": "ScrollingFrame",
-	"TextLabel": "TextLabel", "TextButton": "TextButton", "TextBox": "TextBox",
-	"ImageLabel": "ImageLabel", "ImageButton": "ImageButton", "Humanoid": "Humanoid",
-	"Character": "Character", "PointLight": "PointLight", "SpotLight": "SpotLight",
-	"SurfaceLight": "SurfaceLight", "Sound": "Sound", "RemoteEvent": "RemoteEvent",
-	"RemoteFunction": "RemoteFunction", "BindableEvent": "BindableEvent", "BindableFunction": "BindableFunction",
-	"StringValue": "StringValue", "NumberValue": "NumberValue", "BoolValue": "BoolValue",
-	"ObjectValue": "ObjectValue", "Vector3Value": "Vector3Value", "ParticleEmitter": "ParticleEmitter",
-	"Beam": "Beam", "Trail": "Trail", "Highlight": "Highlight"
-}
-
-class StudioVectorProperty extends EditorProperty:
-	var controls: Array[SpinBox] = []
-	var updating := false
-	var degrees := false
-	func _init(as_degrees: bool = false) -> void:
-		degrees = as_degrees
-		var row := HBoxContainer.new()
-		add_child(row)
-		for axis in range(3):
-			var number := SpinBox.new()
-			number.min_value = -100000
-			number.max_value = 100000
-			number.step = 0.1
-			number.allow_greater = true
-			number.allow_lesser = true
-			number.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			number.value_changed.connect(_changed)
-			row.add_child(number)
-			controls.append(number)
-	func _changed(_value: float) -> void:
-		if updating:
-			return
-		var value := Vector3(controls[0].value, controls[1].value, controls[2].value)
-		if degrees:
-			value *= PI / 180.0
-		emit_changed(get_edited_property(), value)
-	func _update_property() -> void:
-		var value: Vector3 = get_edited_object().get(get_edited_property())
-		if degrees:
-			value *= 180.0 / PI
-		updating = true
-		for axis in range(3):
-			controls[axis].value = value[axis]
-		updating = false
 
 class StudioInspector extends EditorInspectorPlugin:
 	const PropertyGrid = preload("res://addons/ROMEStudio/studio_properties.gd")
+	var _shown: Dictionary = {}
 	func _can_handle(object: Object) -> bool:
-		return object is Node and (object.is_class("RobloxPart") or object.has_method("get_codigo_luau"))
-	func _parse_property(object: Object, _type: Variant.Type, name: String, _hint: PropertyHint, _hint_string: String, _usage: int, _wide: bool) -> bool:
-		if object.is_class("RobloxPart"):
-			if name == "Size":
-				add_property_editor_for_multiple_properties("", PackedStringArray(["name", "Color", "Material", "Size", "position", "rotation", "Anchored", "Locked", "CanCollide", "CanTouch", "CanQuery", "Massless", "Transparency", "Reflectance", "CastShadow"]), PropertyGrid.new(object))
-			return true
-		if name in ["position", "rotation", "scale"]:
-			var property := StudioVectorProperty.new(name == "rotation")
-			property.label = "Orientation" if name == "rotation" else name.capitalize()
-			add_property_editor(name, property)
-			return true
+		var root := EditorInterface.get_edited_scene_root()
+		if not ProjectSettings.get_setting("rome/studio/enabled", false) or not object is Node or root == null or not (object == root or root.is_ancestor_of(object)):
+			return false
+		if object.is_class("RobloxGame3D") or object.is_class("RobloxGame2D") or object.is_class("RobloxTerrain"):
+			return false
+		return ClassDB.class_get_api_type(object.get_class()) in [ClassDB.API_EXTENSION, ClassDB.API_EDITOR_EXTENSION]
+	func _parse_begin(object: Object) -> void:
+		var grid := PropertyGrid.new(object as Node, inspector_filter())
+		_shown = grid.shown
+		add_property_editor_for_multiple_properties("", PackedStringArray(_shown.keys()), grid)
+	func _parse_property(_object: Object, _type: Variant.Type, name: String, _hint: PropertyHint, _hint_string: String, _usage: int, _wide: bool) -> bool:
 		if name == "codigo_luau":
 			return false
+		if _shown.has(name) or name.begins_with("metadata/"):
+			return true
 		return name.is_empty() or name[0] != name[0].to_upper()
+	## Text of the Inspector dock's property filter.
+	static func inspector_filter() -> String:
+		var inspector := EditorInterface.get_inspector()
+		if inspector == null or inspector.get_parent() == null or inspector.get_parent().get_parent() == null:
+			return ""
+		for row in inspector.get_parent().get_parent().get_children():
+			if row is HBoxContainer:
+				for child in row.get_children():
+					if child is LineEdit:
+						return child.text
+		return ""
 
 func _enter_tree() -> void:
 	_editor_node = EditorInterface.get_base_control().get_parent()
@@ -296,13 +269,6 @@ func _ensure_spawn_symbols(root: Node) -> void:
 	if changed:
 		EditorInterface.mark_scene_as_unsaved()
 
-
-func _has_property(object: Object, property_name: String) -> bool:
-	for info in object.get_property_list():
-		if info.name == property_name:
-			return true
-	return false
-
 func _editor_action(action: String, payload: Variant) -> void:
 	if action == "resources":
 		_resources.make_visible()
@@ -319,6 +285,10 @@ func _editor_action(action: String, payload: Variant) -> void:
 	if action == "insert":
 		_show_object_picker()
 		return
+	if action == "insert_part":
+		var shape := int(payload) if payload is int or payload is float else 0
+		_insert_entry(Catalog.entry_for("Part"), clampi(shape, 0, PART_SIZES.size() - 1))
+		return
 	if action == "import":
 		for plugin in _editor_node.get_children():
 			if plugin.has_method("_pick_rbxl"):
@@ -328,152 +298,331 @@ func _editor_action(action: String, payload: Variant) -> void:
 	var selected := EditorInterface.get_selection().get_selected_nodes()
 	if selected.is_empty():
 		return
-	if action == "group":
-		_group_selection(selected)
+	match action:
+		"group":
+			_group_selection(selected, "RBXModel", "Model")
+		"group_folder":
+			_group_selection(selected, "Folder", "Folder")
+		"ungroup":
+			_ungroup_selection(selected)
+		"anchor", "lock":
+			_set_on_selection(selected, "Anchored" if action == "anchor" else "Locked", null, true)
+		"anchor_set", "lock_set":
+			if payload is bool or payload is int:
+				_set_on_selection(selected, "Anchored" if action == "anchor_set" else "Locked", bool(payload))
+		"color":
+			if payload is Color:
+				_set_on_selection(selected, "Color", payload, false, true)
+		"material", "insert_material":
+			var index := int(payload) if payload is int or payload is float else -1
+			if index >= 0 and index < MATERIALS.size():
+				_set_on_selection(selected, "Material", MATERIALS[index], false, true)
+
+## Applies to the selection and to the Parts inside selected Models, like Studio.
+func _set_on_selection(selected: Array[Node], property_name: String, value: Variant, toggle := false, merge := false) -> void:
+	var targets: Array[Node] = []
+	var seen := {}
+	for object in selected:
+		var candidates: Array[Node] = [object]
+		if not object.is_class("RobloxPart"):
+			candidates.append_array(object.find_children("*", "RobloxPart", true, true))
+		for node in candidates:
+			if not seen.has(node) and property_name in node:
+				seen[node] = true
+				targets.append(node)
+	if targets.is_empty():
 		return
-	var property_name := {"anchor": "Anchored", "lock": "Locked", "color": "Color", "material": "Material"}.get(action, "") as String
-	if property_name.is_empty():
-		return
+	if toggle:
+		value = not bool(targets[0].get(property_name))
 	var undo := get_undo_redo()
-	undo.create_action("Set " + property_name, UndoRedo.MERGE_ENDS if action in ["color", "material"] else UndoRedo.MERGE_DISABLE)
-	var target: Variant = payload
-	if action in ["anchor", "lock"]:
-		for object in selected:
-			if _has_property(object, property_name):
-				target = not bool(object.get(property_name))
-				break
-	if action == "material":
-		target = [0, 3, 10, 7, 16, 2, 14][int(payload)]
+	undo.create_action("Cambiar " + property_name, UndoRedo.MERGE_ENDS if merge else UndoRedo.MERGE_DISABLE, EditorInterface.get_edited_scene_root())
+	for object in targets:
+		undo.add_do_property(object, property_name, value)
+		undo.add_undo_property(object, property_name, object.get(property_name))
 	for object in selected:
-		if _has_property(object, property_name):
-			undo.add_do_property(object, property_name, target)
-			undo.add_undo_property(object, property_name, object.get(property_name))
+		undo.add_do_method(object, "notify_property_list_changed")
+		undo.add_undo_method(object, "notify_property_list_changed")
 	undo.commit_action()
-	for object in selected:
-		object.notify_property_list_changed()
 	EditorInterface.mark_scene_as_unsaved()
 
 func _show_object_picker() -> void:
 	if _picker == null:
-		_picker = ConfirmationDialog.new()
-		_picker.title = "Insertar objeto"
-		_picker.ok_button_text = "Insertar"
+		_picker = InsertDialog.new()
+		_picker.describe = _describe_destination
+		_picker.object_chosen.connect(_insert_object)
 		EditorInterface.get_base_control().add_child(_picker)
-		var layout := VBoxContainer.new()
-		_picker.add_child(layout)
-		_picker_search = LineEdit.new()
-		_picker_search.placeholder_text = "Buscar objeto"
-		_picker_search.text_changed.connect(_filter_objects)
-		layout.add_child(_picker_search)
-		_picker_list = ItemList.new()
-		_picker_list.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_picker_list.item_activated.connect(func(_index: int) -> void: _confirm_object())
-		layout.add_child(_picker_list)
-		_picker.confirmed.connect(_confirm_object)
-	_picker_search.text = ""
-	_filter_objects("")
-	_picker.popup_centered(Vector2i(420, 520))
-	_picker_search.grab_focus()
+	_picker.open()
 
-func _filter_objects(query: String) -> void:
-	_picker_list.clear()
-	for title: String in OBJECTS:
-		var class_name_value: String = OBJECTS[title]
-		if not ClassDB.can_instantiate(class_name_value) or not title.to_lower().contains(query.to_lower()):
-			continue
-		var icon_path := "res://GodotLuau/icons/" + title + ".svg"
-		var icon: Texture2D = load(icon_path) if ResourceLoader.exists(icon_path) else EditorInterface.get_editor_theme().get_icon("Node", "EditorIcons")
-		var index := _picker_list.add_item(title, icon)
-		_picker_list.set_item_metadata(index, class_name_value)
-	if _picker_list.item_count > 0:
-		_picker_list.select(0)
-
-func _confirm_object() -> void:
-	var selected := _picker_list.get_selected_items()
-	if selected.is_empty():
-		return
-	_insert_object(str(_picker_list.get_item_metadata(selected[0])))
-	_picker.hide()
-
-func _group_selection(selection: Array[Node]) -> void:
+func _describe_destination(title: String) -> String:
 	var root := EditorInterface.get_edited_scene_root()
-	var group := ClassDB.instantiate("RBXModel") as Node3D
-	group.name = "Model"
-	var parent := selection[0].get_parent()
-	if parent == null or selection.has(root):
-		group.free()
-		return
+	var entry := Catalog.entry_for(title)
+	if root == null or entry.is_empty():
+		return ""
+	var selection := EditorInterface.get_selection().get_selected_nodes()
+	var parent := _destination(entry, selection[0] if not selection.is_empty() else null, root)
+	if parent == null and entry.kind == "gui":
+		parent = _screen_gui(root)
+		if parent == null:
+			return "StarterGui (en un ScreenGui nuevo)"
+	return str(parent.name) if parent != null else str(root.name)
+
+func _insert_object(type_name: String) -> void:
+	_insert_entry(Catalog.entry_for(type_name))
+
+func _insert_entry(entry: Dictionary, shape := -1) -> Node:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null or entry.is_empty() or not ClassDB.can_instantiate(entry.type):
+		return null
+	var selection := EditorInterface.get_selection().get_selected_nodes()
+	var parent := _destination(entry, selection[0] if not selection.is_empty() else null, root)
+	var object := ClassDB.instantiate(entry.type) as Node
+	if object == null:
+		return null
+	object.name = entry.name
+	if not str(entry.rbx_class).is_empty():
+		object.set_meta("__rbx_class", entry.rbx_class)
+	if shape < 0:
+		shape = entry.shape
+	if object.is_class("SpawnLocation"):
+		object.set("Size", Vector3(12, 1, 12))
+		object.set("Anchored", true)
+	elif object.is_class("Part"):
+		object.set("Shape", maxi(shape, 0))
+		object.set("Size", PART_SIZES[maxi(shape, 0)])
+	var top := object
+	if parent == null and entry.kind == "gui":
+		parent = _screen_gui(root)
+		if parent == null and root.has_node("StarterGui") and ClassDB.can_instantiate("ScreenGui"):
+			top = ClassDB.instantiate("ScreenGui")
+			top.name = "ScreenGui"
+			top.add_child(object)
+			parent = root.get_node("StarterGui")
+	if parent == null:
+		parent = root
+	var workspace := root.get_node_or_null("Workspace")
+	if top is Node3D and _placeable(top) and workspace != null and (parent == workspace or workspace.is_ancestor_of(parent)):
+		Placement.place(top as Node3D, parent, root)
+	var undo := get_undo_redo()
+	undo.create_action("Insertar " + str(entry.name), UndoRedo.MERGE_DISABLE, root)
+	undo.add_do_method(parent, "add_child", top, true)
+	undo.add_do_method(top, "set_owner", root)
+	if top != object:
+		undo.add_do_method(object, "set_owner", root)
+	undo.add_do_reference(top)
+	undo.add_undo_method(parent, "remove_child", top)
+	undo.commit_action()
+	_select_nodes([object])
+	EditorInterface.edit_node(object)
+	EditorInterface.mark_scene_as_unsaved()
+	InsertDialog.remember(str(entry.name))
+	return object
+
+func _placeable(node: Node) -> bool:
+	return node.is_class("RobloxPart") or node.is_class("RobloxPlayer") or node.is_class("RobloxTool") or (node.is_class("RBXModel") and not node.is_class("WorldModel"))
+
+func _screen_gui(root: Node) -> Node:
+	var starter := root.get_node_or_null("StarterGui")
+	if starter != null:
+		for child in starter.get_children():
+			if child.is_class("ScreenGui"):
+				return child
+	return null
+
+## Studio's destination rules; null for a GUI object means "inside a ScreenGui".
+func _destination(entry: Dictionary, selected: Node, root: Node) -> Node:
+	var chosen: Node = selected if selected != null and selected != root and root.is_ancestor_of(selected) else null
+	var type: String = entry.type
+	match str(entry.kind):
+		"world", "attach":
+			if chosen != null and (chosen is Node3D or chosen.is_class("Folder") or (chosen.get_parent() == root and str(chosen.name) in STORAGE)):
+				return chosen
+			return root.get_node_or_null("Workspace")
+		"script":
+			if type == "ServerScript":
+				return chosen if chosen != null and chosen.name != "Workspace" else root.get_node_or_null("ServerScriptService")
+			if type == "LocalScript":
+				return chosen if chosen != null else root.get_node_or_null("StarterPlayer/StarterPlayerScripts")
+			return chosen if chosen != null else root.get_node_or_null("ReplicatedStorage")
+		"screen_gui":
+			return root.get_node_or_null("StarterGui")
+		"gui":
+			if chosen != null and (chosen is Control or chosen.is_class("ScreenGui") or chosen.is_class("BillboardGui") or chosen.is_class("SurfaceGui")):
+				return chosen
+			return null
+		"gui_modifier":
+			return chosen if chosen != null else root.get_node_or_null("StarterGui")
+		"lighting":
+			if chosen != null and (chosen.name == "Lighting" or chosen.is_class("Camera") or chosen is Camera3D):
+				return chosen
+			return root.get_node_or_null("Lighting")
+		"terrain":
+			var terrain := root.get_node_or_null("Workspace/Terrain")
+			return terrain if terrain != null else root.get_node_or_null("Workspace")
+		"sound_effect":
+			if chosen != null and (chosen.is_class("RobloxSound") or chosen.is_class("RobloxSoundGroup") or chosen.name == "SoundService"):
+				return chosen
+			return root.get_node_or_null("SoundService")
+		"sound_service":
+			return chosen if chosen != null else root.get_node_or_null("SoundService")
+		"remote":
+			return chosen if chosen != null else root.get_node_or_null("ReplicatedStorage")
+		"teams", "chat", "material":
+			var service := root.get_node_or_null({"teams": "Teams", "chat": "TextChatService", "material": "MaterialService"}[entry.kind])
+			if chosen != null and service != null and (chosen == service or service.is_ancestor_of(chosen)):
+				return chosen
+			return service
+	return chosen if chosen != null else root.get_node_or_null("Workspace")
+
+## Top-level selected nodes in tree order, without the root, services or nodes
+## that belong to an instanced scene.
+func _top_level(selection: Array[Node]) -> Array[Node]:
+	var root := EditorInterface.get_edited_scene_root()
 	var nodes: Array[Node] = []
-	var parents: Array[Node] = []
+	if root == null:
+		return nodes
 	for object in selection:
+		if object == root or object.owner != root or not root.is_ancestor_of(object) or _is_service(object, root):
+			continue
 		var nested := false
 		for other in selection:
 			if other != object and other.is_ancestor_of(object):
 				nested = true
 		if not nested:
 			nodes.append(object)
-			parents.append(object.get_parent())
-	var undo := get_undo_redo()
-	undo.create_action("Group objects", UndoRedo.MERGE_DISABLE, root)
-	undo.add_do_method(self, "_do_group", group, parent, nodes, root)
-	undo.add_undo_method(self, "_undo_group", group, nodes, parents, root)
-	undo.add_do_reference(group)
-	undo.commit_action()
-	EditorInterface.get_selection().clear()
-	EditorInterface.get_selection().add_node(group)
+	nodes.sort_custom(func(a: Node, b: Node) -> bool: return b.is_greater_than(a))
+	return nodes
 
-func _do_group(group: Node, parent: Node, nodes: Array[Node], root: Node) -> void:
-	parent.add_child(group, true)
-	group.owner = root
-	for object in nodes:
-		object.reparent(group, true)
-		object.owner = root
+func _is_service(node: Node, root: Node) -> bool:
+	if node.get_parent() == root:
+		return Services.SERVICES.has(str(node.name))
+	return node.get_parent().get_parent() == root and node.get_parent().name == "StarterPlayer" and node.name in ["StarterCharacterScripts", "StarterPlayerScripts"]
 
-func _undo_group(group: Node, nodes: Array[Node], parents: Array[Node], root: Node) -> void:
-	for i in nodes.size():
-		nodes[i].reparent(parents[i], true)
-		nodes[i].owner = root
-	group.get_parent().remove_child(group)
-
-func _find_service(root: Node, service_name: String) -> Node:
-	return root.get_node_or_null(NodePath(service_name))
-
-func _insert_object(type_name: String) -> void:
+func _group_selection(selection: Array[Node], container_type: String, title: String) -> void:
 	var root := EditorInterface.get_edited_scene_root()
-	if root == null or not ClassDB.can_instantiate(type_name):
+	var nodes := _top_level(selection)
+	if nodes.is_empty() or not ClassDB.can_instantiate(container_type):
 		return
-	var parent: Node = root
-	var selection := EditorInterface.get_selection().get_selected_nodes()
-	if not selection.is_empty():
-		parent = selection[0]
-	var world_types := ["Part", "SpawnLocation", "RBXMeshPart", "Character", "PointLight", "SpotLight", "Folder", "RBXModel"]
-	if type_name in world_types and (parent == root or not parent is Node3D):
-		parent = _find_service(root, "Workspace")
-	elif type_name == "ServerScript" and (parent == root or parent.name == "Workspace"):
-		parent = _find_service(root, "ServerScriptService")
-	elif type_name == "LocalScript" and parent == root:
-		parent = root.get_node_or_null("StarterPlayer/StarterPlayerScripts")
-	elif type_name == "ModuleScript" and parent == root:
-		parent = _find_service(root, "ReplicatedStorage")
-	elif type_name == "ScreenGui":
-		parent = _find_service(root, "StarterGui")
-	if parent == null:
-		parent = root
-	var object := ClassDB.instantiate(type_name) as Node
-	if object == null:
-		return
-	object.name = "Script" if type_name == "ServerScript" else type_name
-	if type_name == "Part":
-		object.set("Size", Vector3(4, 1.2, 2))
-		object.set("position", Vector3(0, 4, 0))
+	var parent := nodes[0].get_parent()
+	var group := ClassDB.instantiate(container_type) as Node
+	group.name = _unique_name(title, _child_names(parent))
+	var inside := {}
+	var moves := []
+	var restores := []
+	for i in nodes.size():
+		moves.append(_move(nodes[i], group, i, _unique_name(str(nodes[i].name), inside)))
+		restores.append(_move(nodes[i], nodes[i].get_parent(), nodes[i].get_index(), str(nodes[i].name)))
 	var undo := get_undo_redo()
-	undo.create_action("Insert " + type_name)
-	undo.add_do_method(parent, "add_child", object, true)
-	undo.add_do_method(object, "set_owner", root)
-	undo.add_do_reference(object)
-	undo.add_undo_method(parent, "remove_child", object)
+	undo.create_action("Agrupar en " + title, UndoRedo.MERGE_DISABLE, root)
+	undo.add_do_method(self, "_attach", group, parent, nodes[0].get_index(), root)
+	undo.add_do_method(self, "_reparent_moves", moves)
+	undo.add_do_method(self, "_finish_moves", moves)
+	undo.add_do_method(self, "_select_nodes", [group])
+	undo.add_do_reference(group)
+	undo.add_undo_method(self, "_reparent_moves", restores)
+	undo.add_undo_method(self, "_detach", group)
+	undo.add_undo_method(self, "_finish_moves", restores)
+	undo.add_undo_method(self, "_select_nodes", nodes)
 	undo.commit_action()
-	EditorInterface.get_selection().clear()
-	EditorInterface.get_selection().add_node(object)
-	EditorInterface.edit_node(object)
 	EditorInterface.mark_scene_as_unsaved()
+
+func _ungroup_selection(selection: Array[Node]) -> void:
+	var root := EditorInterface.get_edited_scene_root()
+	var containers: Array[Node] = []
+	for node in _top_level(selection):
+		if (node.is_class("RBXModel") or node.is_class("Folder")) and node.scene_file_path.is_empty():
+			containers.append(node)
+	if containers.is_empty():
+		return
+	# Later siblings first: the indices of earlier containers stay valid.
+	containers.reverse()
+	var names_by_parent := {}
+	var steps := []
+	var released := []
+	for container in containers:
+		var parent := container.get_parent()
+		if not names_by_parent.has(parent):
+			names_by_parent[parent] = _child_names(parent)
+		var used: Dictionary = names_by_parent[parent]
+		used.erase(str(container.name))
+		var out := []
+		var back := []
+		for child in container.get_children():
+			if child.owner != root:
+				continue
+			out.append(_move(child, parent, container.get_index() + out.size(), _unique_name(str(child.name), used)))
+			back.append(_move(child, container, child.get_index(), str(child.name)))
+			released.append(child)
+		steps.append([container, parent, container.get_index(), out, back])
+	var undo := get_undo_redo()
+	undo.create_action("Desagrupar", UndoRedo.MERGE_DISABLE, root)
+	for step: Array in steps:
+		undo.add_do_method(self, "_reparent_moves", step[3])
+		undo.add_do_method(self, "_detach", step[0])
+		undo.add_do_method(self, "_finish_moves", step[3])
+		undo.add_undo_reference(step[0])
+	undo.add_do_method(self, "_select_nodes", released)
+	for i in range(steps.size() - 1, -1, -1):
+		undo.add_undo_method(self, "_attach", steps[i][0], steps[i][1], steps[i][2], root)
+		undo.add_undo_method(self, "_reparent_moves", steps[i][4])
+		undo.add_undo_method(self, "_finish_moves", steps[i][4])
+	undo.add_undo_method(self, "_select_nodes", containers)
+	undo.commit_action()
+	EditorInterface.mark_scene_as_unsaved()
+
+func _move(node: Node, parent: Node, index: int, title: String) -> Dictionary:
+	var move := {"node": node, "parent": parent, "index": index, "name": title}
+	if node is Node3D or node is Node2D:
+		move["transform"] = node.global_transform
+	return move
+
+## Moves keep each node (and its ownership); the exact global transform is restored.
+func _reparent_moves(moves: Array) -> void:
+	for move: Dictionary in moves:
+		var node: Node = move.node
+		if node.get_parent() != move.parent:
+			node.reparent(move.parent, true)
+		# A temporary name avoids clashes while siblings are renamed.
+		node.name = "_rome_move_%d" % node.get_instance_id()
+		if move.has("transform"):
+			node.global_transform = move.transform
+
+func _finish_moves(moves: Array) -> void:
+	for move: Dictionary in moves:
+		var node: Node = move.node
+		node.name = move.name
+	var ordered := moves.duplicate()
+	ordered.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.index < b.index)
+	for move: Dictionary in ordered:
+		var parent: Node = move.parent
+		parent.move_child(move.node, clampi(move.index, 0, parent.get_child_count() - 1))
+
+func _attach(node: Node, parent: Node, index: int, root: Node) -> void:
+	parent.add_child(node)
+	parent.move_child(node, clampi(index, 0, parent.get_child_count() - 1))
+	node.owner = root
+
+func _detach(node: Node) -> void:
+	if node.get_parent() != null:
+		node.get_parent().remove_child(node)
+
+func _select_nodes(nodes: Array) -> void:
+	var selection := EditorInterface.get_selection()
+	selection.clear()
+	for node in nodes:
+		if is_instance_valid(node) and node.is_inside_tree():
+			selection.add_node(node)
+
+static func _unique_name(base: String, used: Dictionary) -> String:
+	var candidate := base
+	var suffix := 2
+	while used.has(candidate):
+		candidate = base + str(suffix)
+		suffix += 1
+	used[candidate] = true
+	return candidate
+
+static func _child_names(parent: Node) -> Dictionary:
+	var names := {}
+	for child in parent.get_children():
+		names[str(child.name)] = true
+	return names

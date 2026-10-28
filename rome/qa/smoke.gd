@@ -36,6 +36,16 @@ func _run() -> void:
 		if not _check(root.has_node(NodePath(service)), "Service " + service):
 			return
 	var native := EditorInterface.get_base_control().get_parent()
+	var output := native.find_child("Output", true, false) as EditorDock
+	var bottom_panels := native.find_children("*", "EditorBottomPanel", true, false)
+	if not _check(output != null and output.default_slot == EditorDock.DOCK_SLOT_BOTTOM and not bottom_panels.is_empty() and bottom_panels[0].is_ancestor_of(output), "Console is docked below the world"):
+		return
+	var console_banner := false
+	for text: RichTextLabel in output.find_children("*", "RichTextLabel", true, false):
+		if text.get_parsed_text().contains("ROME Engine 0.1.0-alpha.1 X Godot Luau | Rocket Meteor"):
+			console_banner = true
+	if not _check(console_banner, "Console starts with ROME and Godot Luau branding"):
+		return
 	await get_tree().process_frame
 	var marker := root.get_node_or_null("Workspace/SpawnLocation/SpawnSymbol/Artwork") as MeshInstance3D
 	if not _check(marker != null and marker.mesh is PlaneMesh, "Spawn symbol retains a separate decal mesh"):
@@ -187,6 +197,18 @@ func _run() -> void:
 	if not _check(doc_report.errors.is_empty(), "Unified document tabs: " + str(doc_report.errors)):
 		return
 	checks.append_array(doc_report.checks)
+	var ribbon: Dictionary = await preload("res://addons/ROMESmoke/ribbon_checks.gd").run(native, root)
+	if not _check(ribbon.errors.is_empty(), "Studio ribbon dropdowns, snapping and shortcuts: " + str(ribbon.errors)):
+		return
+	checks.append_array(ribbon.checks)
+	var updates: Dictionary = preload("res://addons/ROMESmoke/update_checks.gd").run()
+	if not _check(updates.errors.is_empty(), "Update release, version and integrity rules: " + str(updates.errors)):
+		return
+	checks.append_array(updates.checks)
+	var panels: Dictionary = await preload("res://addons/ROMESmoke/studio_panels_checks.gd").run(root)
+	if not _check(panels.has("errors") and panels.errors.is_empty(), "Studio panels, insertion and properties: " + str(panels.get("errors", "la prueba se detuvo"))):
+		return
+	checks.append_array(panels.checks)
 	var report := FileAccess.open("res://integration-result.json", FileAccess.WRITE)
 	report.store_string(JSON.stringify({"passed": true, "checks": checks}, "  "))
 	report.close()

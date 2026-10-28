@@ -724,4 +724,15 @@ EditorRunBar::EditorRunBar() {
 	write_movie_button->set_tooltip_text(TTRC("Enable Movie Maker mode.\nThe project will run at stable FPS and the visual and audio output will be recorded to a video file."));
 	write_movie_button->set_accessibility_name(TTRC("Enable Movie Maker Mode"));
 	write_movie_button->set_flat(false);
+
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		// Studio's test group: play, pause and a red stop. Current-scene runs live in the Probar menu.
+		play_scene_button->hide();
+		play_custom_scene_button->hide();
+		write_movie_panel->hide();
+		for (const StringName &state : { StringName("icon_normal_color"), StringName("icon_hover_color"), StringName("icon_pressed_color"), StringName("icon_hover_pressed_color") }) {
+			play_button->add_theme_color_override(state, Color::html("4f7bff"));
+			stop_button->add_theme_color_override(state, Color::html("e5534b"));
+		}
+	}
 }

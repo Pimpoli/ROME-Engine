@@ -15,8 +15,14 @@ import subprocess
 import sys
 
 from build_runtime import prepare
+from package_runtime import keep_luau_with_rome
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def rome_version():
+    text = (ROOT / "core/version.h").read_text(encoding="utf-8")
+    return re.search(r'#define ROME_VERSION "([^"]+)"', text).group(1)
 
 
 def run(command, cwd=ROOT, **kwargs):
@@ -69,6 +75,7 @@ def adapt_presentation(project: Path):
     text = text.replace('\t_mp_bar.add_child(_mp_device)', '\tvar device_slot := EditorInterface.get_base_control().find_child("ROMEDeviceSlot", true, false)\n\tif device_slot != null:\n\t\tdevice_slot.add_child(_mp_device)\n\telse:\n\t\t_mp_bar.add_child(_mp_device)')
     text = text.replace('_mp_count.custom_minimum_size = Vector2(90, 0)', '_mp_count.custom_minimum_size = Vector2(54, 0)')
     editor.write_text(text, encoding="utf-8", newline="\n")
+    keep_luau_with_rome(project)
 
 
 def bundle_runtime(source: Path, libraries: Path, output: Path, provenance: dict):
@@ -161,7 +168,7 @@ renderer/rendering_method="gl_compatibility"
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=ROOT / "rome/vendor/GodotLuau")
-    parser.add_argument("--version", default="0.1.0-alpha.1")
+    parser.add_argument("--version", default=rome_version(), help="Must match ROME_VERSION in core/version.h")
     parser.add_argument("--jobs", type=int, default=2)
     parser.add_argument("--output", type=Path, default=ROOT / "bin/release")
     parser.add_argument("--skip-editor-build", action="store_true")

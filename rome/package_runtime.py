@@ -10,6 +10,29 @@ from pathlib import Path
 import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
+ROME_GUARD = '\tif ProjectSettings.get_setting("rome/studio/enabled", false):\n'
+
+
+def keep_luau_with_rome(project: Path):
+    """The bundled GodotLuau is built for this engine and arrives with ROME updates.
+
+    Its own updater would replace it with an upstream build inside the user's
+    experience, so in ROME experiences it only shows the bundled version.
+    """
+    updater = project / "addons/GodotLuauUpdater/plugin_actualizador.gd"
+    text = updater.read_text(encoding="utf-8")
+    if ROME_GUARD in text:
+        return
+    notice = '\t\t_set_ver_status(_get_local_version() + " · incluido en ROME", "", _col_dim)\n'
+    entries = {
+        "func _check_for_update() -> void:\n": ROME_GUARD + notice + "\t\treturn\n",
+        "func _start_download() -> void:\n": ROME_GUARD + "\t\t_downloading = false\n" + notice + "\t\treturn\n",
+    }
+    for entry, guard in entries.items():
+        if text.count(entry) != 1:
+            raise SystemExit(f"GodotLuauUpdater changed ({entry.strip()}): update keep_luau_with_rome in rome/package_runtime.py")
+        text = text.replace(entry, entry + guard)
+    updater.write_text(text, encoding="utf-8", newline="\n")
 
 
 def refresh_rome(output: Path):
@@ -17,6 +40,7 @@ def refresh_rome(output: Path):
     project = output / "project"
     if not (project / "GodotLuau/godot_luau.gdextension").is_file():
         raise SystemExit("An existing runtime bundle is required for --rome-only.")
+    keep_luau_with_rome(project)
     addon = project / "addons/ROMEStudio"
     shutil.copytree(ROOT / "rome/addons/ROMEStudio", addon, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("*.import", "*.uid", "__pycache__"))
@@ -85,6 +109,7 @@ def package(source: Path, output: Path, binary_source: Path | None = None):
     text = text.replace('\t_mp_bar.add_child(_mp_device)', '\tvar device_slot := EditorInterface.get_base_control().find_child("ROMEDeviceSlot", true, false)\n\tif device_slot != null:\n\t\tdevice_slot.add_child(_mp_device)\n\telse:\n\t\t_mp_bar.add_child(_mp_device)')
     text = text.replace('_mp_count.custom_minimum_size = Vector2(90, 0)', '_mp_count.custom_minimum_size = Vector2(54, 0)')
     editor_plugin.write_text(text, encoding="utf-8", newline="\n")
+    keep_luau_with_rome(project)
     shutil.copytree(ROOT / "rome/addons/ROMEStudio", project / "addons/ROMEStudio", dirs_exist_ok=True, ignore=ignore)
 
     for asset in (ROOT / "rome/assets/templates").iterdir():

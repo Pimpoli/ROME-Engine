@@ -57,7 +57,10 @@ class SceneTreeEditor : public Control {
 		BUTTON_GROUPS = 7,
 		BUTTON_PIN = 8,
 		BUTTON_UNIQUE = 9,
+		BUTTON_ROME_INSERT = 10,
 	};
+	ObjectID rome_hover_node;
+	void _rome_set_hover(Node *p_node);
 
 	struct CachedNode {
 		Node *node = nullptr;

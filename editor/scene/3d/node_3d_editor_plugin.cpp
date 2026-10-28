@@ -3031,6 +3031,7 @@ void Node3DEditor::_register_all_gizmos() {
 
 void Node3DEditor::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rome_set_view_state", "state"), &Node3DEditor::set_state);
+	ClassDB::bind_method(D_METHOD("rome_get_view_state"), &Node3DEditor::get_state);
 	ClassDB::bind_method("_get_editor_data", &Node3DEditor::_get_editor_data);
 	ClassDB::bind_method("_request_gizmo", &Node3DEditor::_request_gizmo);
 	ClassDB::bind_method("_request_gizmo_for_id", &Node3DEditor::_request_gizmo_for_id);

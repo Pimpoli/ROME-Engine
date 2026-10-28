@@ -1,7 +1,11 @@
 #include "editor_node.h"
 
+#include "core/config/project_settings.h"
+#include "core/input/input_event.h"
 #include "core/object/callable_mp.h"
 #include "editor/docks/editor_dock_manager.h"
+#include "editor/editor_main_screen.h"
+#include "editor/run/editor_run_bar.h"
 #include "editor/docks/filesystem_dock.h"
 #include "editor/docks/inspector_dock.h"
 #include "editor/docks/scene_tree_dock.h"
@@ -21,15 +25,20 @@
 #include "core/object/editor_language.h"
 #include "scene/gui/code_edit.h"
 #include "scene/gui/popup_menu.h"
+#include "scene/3d/node_3d.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/button.h"
+#include "scene/gui/check_box.h"
 #include "scene/gui/color_picker.h"
 #include "scene/gui/label.h"
+#include "scene/gui/line_edit.h"
+#include "scene/gui/menu_button.h"
 #include "scene/gui/option_button.h"
 #include "scene/gui/panel_container.h"
 #include "scene/gui/scroll_container.h"
 #include "scene/gui/separator.h"
 #include "scene/gui/spin_box.h"
+#include "scene/gui/text_edit.h"
 #include "scene/gui/texture_rect.h"
 #include "scene/resources/style_box_flat.h"
 
@@ -124,12 +133,149 @@ void EditorNode::_rome_material_changed(int p_material) {
 }
 
 void EditorNode::_rome_snap_changed(double p_value, bool p_rotation) {
+	rome_snap_step[p_rotation ? 1 : 0] = p_value;
+	rome_snap_enabled[p_rotation ? 1 : 0] = true;
+	_rome_sync_snap_controls();
+	_rome_apply_snap();
+}
+
+void EditorNode::_rome_snap_toggled(bool p_enabled, bool p_rotation) {
+	rome_snap_enabled[p_rotation ? 1 : 0] = p_enabled;
+	_rome_sync_snap_controls();
+	_rome_apply_snap();
+}
+
+void EditorNode::_rome_sync_snap_controls() {
+	if (!rome_pages_row) {
+		return;
+	}
+	TypedArray<Node> controls = rome_pages_row->find_children("ROMESnap*", "", true, false);
+	for (int i = 0; i < controls.size(); i++) {
+		Node *control = Object::cast_to<Node>(controls[i]);
+		const int axis = String(control->get_name()).ends_with("1") ? 1 : 0;
+		if (CheckBox *toggle = Object::cast_to<CheckBox>(control)) {
+			toggle->set_pressed_no_signal(rome_snap_enabled[axis]);
+		} else if (SpinBox *value = Object::cast_to<SpinBox>(control)) {
+			value->set_value_no_signal(rome_snap_step[axis]);
+		}
+	}
+}
+
+void EditorNode::_rome_apply_snap() {
 	Node3DEditor *editor = Node3DEditor::get_singleton();
-	if (editor) {
-		Dictionary state;
-		state[p_rotation ? "rotate_snap" : "translate_snap"] = p_value;
-		state["snap_enabled"] = true;
-		editor->set_state(state);
+	if (!editor) {
+		return;
+	}
+	// Node3DEditor has one snap switch; a zero step leaves that axis free.
+	Dictionary state;
+	state["snap_enabled"] = rome_snap_enabled[0] || rome_snap_enabled[1];
+	state["translate_snap"] = rome_snap_enabled[0] ? rome_snap_step[0] : 0.0;
+	state["rotate_snap"] = rome_snap_enabled[1] ? rome_snap_step[1] : 0.0;
+	editor->set_state(state);
+	EditorSettings *settings = EditorSettings::get_singleton();
+	settings->set_project_metadata("rome", "snap_move", rome_snap_enabled[0]);
+	settings->set_project_metadata("rome", "snap_rotate", rome_snap_enabled[1]);
+	settings->set_project_metadata("rome", "snap_move_value", rome_snap_step[0]);
+	settings->set_project_metadata("rome", "snap_rotate_value", rome_snap_step[1]);
+}
+
+void EditorNode::_rome_emit_action(const String &p_action, const Variant &p_payload) {
+	emit_signal("rome_editor_action", p_action, p_payload);
+}
+
+void EditorNode::_rome_show_tool_menu(Button *p_tool, PopupMenu *p_menu) {
+	p_menu->reset_size();
+	p_menu->set_position(p_tool->get_screen_position() + Vector2(0, p_tool->get_size().y));
+	p_menu->popup();
+}
+
+void EditorNode::_rome_tool_menu_selected(int p_index, const String &p_tool) {
+	if (!rome_tool_menus.has(p_tool)) {
+		return;
+	}
+	const Vector<RomeToolMenuItem> &items = rome_tool_menus[p_tool];
+	ERR_FAIL_INDEX(p_index, items.size());
+	items[p_index].action.call();
+}
+
+void EditorNode::_rome_selection_changed() {
+	if (!rome_pages_row || !editor_selection) {
+		return;
+	}
+	const bool has_selection = !editor_selection->get_selected_nodes().is_empty();
+	TypedArray<Node> tools = rome_pages_row->find_children("Tool*", "Button", true, false);
+	for (int i = 0; i < tools.size(); i++) {
+		Button *tool = Object::cast_to<Button>(tools[i]);
+		if (!tool || !tool->has_meta("rome_needs_selection")) {
+			continue;
+		}
+		tool->set_disabled(!has_selection);
+		tool->set_modulate(Color(1, 1, 1, has_selection ? 1.0 : 0.4));
+		for (int j = 0; j < tool->get_child_count(); j++) {
+			if (Button *arrow = Object::cast_to<Button>(tool->get_child(j))) {
+				arrow->set_disabled(!has_selection);
+			}
+		}
+	}
+}
+
+bool EditorNode::_rome_shortcut_input(const Ref<InputEvent> &p_event) {
+	if (!bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		return false;
+	}
+	Control *focus = get_viewport()->gui_get_focus_owner();
+	if (Object::cast_to<LineEdit>(focus) || Object::cast_to<TextEdit>(focus)) {
+		return false;
+	}
+	if (ED_IS_SHORTCUT("rome/stop_test", p_event)) {
+		project_run_bar->stop_playing();
+		return true;
+	}
+	if (ED_IS_SHORTCUT("editor/run_current_scene", p_event)) {
+		project_run_bar->play_current_scene();
+		return true;
+	}
+	if (editor_main_screen->get_current_tab_control() == ScriptEditor::get_singleton()) {
+		return false;
+	}
+	const char *tools[] = { "rome/tool_select", "rome/tool_move", "rome/tool_scale", "rome/tool_rotate", "rome/tool_transform" };
+	const int modes[] = { Node3DEditor::TOOL_MODE_SELECT, Node3DEditor::TOOL_MODE_MOVE, Node3DEditor::TOOL_MODE_SCALE, Node3DEditor::TOOL_MODE_ROTATE, Node3DEditor::TOOL_MODE_TRANSFORM };
+	for (int i = 0; i < 5; i++) {
+		if (ED_IS_SHORTCUT(tools[i], p_event)) {
+			_rome_set_3d_tool(modes[i]);
+			return true;
+		}
+	}
+	if (ED_IS_SHORTCUT("rome/toggle_local_space", p_event)) {
+		_rome_editor_action("coordinate_space");
+	} else if (ED_IS_SHORTCUT("rome/group", p_event)) {
+		_rome_emit_action("group", Variant());
+	} else if (ED_IS_SHORTCUT("rome/group_folder", p_event)) {
+		_rome_emit_action("group_folder", Variant());
+	} else if (ED_IS_SHORTCUT("rome/ungroup", p_event)) {
+		_rome_emit_action("ungroup", Variant());
+	} else {
+		return false;
+	}
+	return true;
+}
+
+void EditorNode::_rome_prefer_world_view() {
+	// Studio opens a place on its world; an empty script screen is never the first view.
+	ScriptEditor *scripts = ScriptEditor::get_singleton();
+	Node *root = editor_data.get_edited_scene_root();
+	if (scripts && editor_main_screen->get_current_tab_control() == scripts && scripts->get_open_scripts().is_empty() && Object::cast_to<Node3D>(root)) {
+		EditorInterface::get_singleton()->set_main_screen_editor("3D");
+	}
+}
+
+void EditorNode::_rome_play_menu(int p_id) {
+	if (p_id == 0) {
+		project_run_bar->play_main_scene();
+	} else if (p_id == 1) {
+		project_run_bar->play_current_scene();
+	} else {
+		project_run_bar->stop_playing();
 	}
 }
 
@@ -153,12 +299,31 @@ void EditorNode::_rome_create_ribbon() {
 	layout->add_child(mezzanine);
 	rome_run_slot = memnew(HBoxContainer);
 	mezzanine->add_child(rome_run_slot);
-	Button *test_label = memnew(Button);
-	test_label->set_text("Probar");
-	test_label->set_custom_minimum_size(Size2(80, 24) * EDSCALE);
-	test_label->set_tooltip_text("Ejecutar experiencia (F5)");
-	test_label->connect("pressed", callable_mp(this, &EditorNode::_rome_ribbon_action).bind(ROME_PLAY));
-	rome_run_slot->add_child(test_label);
+	MenuButton *test_menu = memnew(MenuButton);
+	test_menu->set_name("ROMETestMenu");
+	test_menu->set_text("Probar");
+	test_menu->set_flat(false);
+	test_menu->set_button_icon(theme->get_icon(SNAME("GuiDropdown"), EditorStringName(EditorIcons)));
+	test_menu->set_icon_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
+	test_menu->set_custom_minimum_size(Size2(86, 24) * EDSCALE);
+	test_menu->set_tooltip_text("Opciones de prueba");
+	PopupMenu *test_popup = test_menu->get_popup();
+	test_popup->add_item("Probar (F5)", 0);
+	test_popup->add_item("Probar escena actual (F6)", 1);
+	test_popup->add_separator();
+	test_popup->add_item(String::utf8("Detener (Mayús+F5)"), 2);
+	test_popup->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_rome_play_menu));
+	rome_run_slot->add_child(test_menu);
+	ED_SHORTCUT("rome/stop_test", "Detener prueba", KeyModifierMask::SHIFT | Key::F5);
+	ED_SHORTCUT("rome/tool_select", "Herramienta Seleccionar", KeyModifierMask::CMD_OR_CTRL | Key::KEY_1);
+	ED_SHORTCUT("rome/tool_move", "Herramienta Mover", KeyModifierMask::CMD_OR_CTRL | Key::KEY_2);
+	ED_SHORTCUT("rome/tool_scale", "Herramienta Escalar", KeyModifierMask::CMD_OR_CTRL | Key::KEY_3);
+	ED_SHORTCUT("rome/tool_rotate", "Herramienta Girar", KeyModifierMask::CMD_OR_CTRL | Key::KEY_4);
+	ED_SHORTCUT("rome/tool_transform", "Herramienta Transformar", KeyModifierMask::CMD_OR_CTRL | Key::KEY_5);
+	ED_SHORTCUT("rome/toggle_local_space", "Alternar espacio local o global", KeyModifierMask::CMD_OR_CTRL | Key::L);
+	ED_SHORTCUT("rome/group", "Agrupar como modelo", KeyModifierMask::CMD_OR_CTRL | Key::G);
+	ED_SHORTCUT("rome/group_folder", "Agrupar como carpeta", KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::ALT | Key::G);
+	ED_SHORTCUT("rome/ungroup", "Desagrupar", KeyModifierMask::CMD_OR_CTRL | Key::U);
 	Control *left_gap = memnew(Control);
 	left_gap->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	mezzanine->add_child(left_gap);
@@ -235,20 +400,41 @@ void EditorNode::_rome_create_ribbon() {
 			button->set_toggle_mode(true);
 			button->set_button_group(modes);
 			button->set_pressed(i == 0);
+			button->set_meta("rome_tool_mode", tools[i]);
 		}
 	};
+	EditorSettings *settings = EditorSettings::get_singleton();
+	rome_snap_enabled[0] = settings->get_project_metadata("rome", "snap_move", false);
+	rome_snap_enabled[1] = settings->get_project_metadata("rome", "snap_rotate", false);
+	rome_snap_step[0] = settings->get_project_metadata("rome", "snap_move_value", 1.0);
+	rome_snap_step[1] = settings->get_project_metadata("rome", "snap_rotate_value", 40.0);
 	auto snaps = [this](Control *row) {
 		VBoxContainer *snap = memnew(VBoxContainer);
 		snap->add_theme_constant_override("separation", 1 * EDSCALE);
 		row->add_child(snap);
+		// Every page shows the same snap state, like Studio's single snapping setting.
 		for (int i = 0; i < 2; i++) {
+			HBoxContainer *line = memnew(HBoxContainer);
+			line->add_theme_constant_override("separation", 2 * EDSCALE);
+			snap->add_child(line);
+			CheckBox *enabled = memnew(CheckBox);
+			enabled->set_name("ROMESnapToggle" + itos(i));
+			enabled->set_focus_mode(Control::FOCUS_NONE);
+			enabled->set_tooltip_text(i ? String::utf8("Ajustar el giro a este \u00e1ngulo") : "Ajustar el movimiento a esta distancia");
+			enabled->set_pressed_no_signal(rome_snap_enabled[i]);
+			enabled->connect(SceneStringName(toggled), callable_mp(this, &EditorNode::_rome_snap_toggled).bind(i == 1));
+			line->add_child(enabled);
 			SpinBox *value = memnew(SpinBox);
-			value->set_min(i ? 1 : 0.01); value->set_max(i ? 180 : 100);
-			value->set_step(i ? 1 : 0.25); value->set_value(i ? 40 : 1);
+			value->set_name("ROMESnapValue" + itos(i));
+			// Range snaps to min + k * step, so the minimum must sit on the step grid.
+			value->set_min(i ? 1 : 0.1); value->set_max(i ? 180 : 100);
+			value->set_step(i ? 1 : 0.1);
+			value->set_custom_arrow_step(i ? 5 : 0.5);
+			value->set_value_no_signal(rome_snap_step[i]);
 			value->set_suffix(i ? String::utf8(u8"\u00b0") : "studs");
-			value->set_custom_minimum_size(Size2(96, 0) * EDSCALE);
+			value->set_custom_minimum_size(Size2(88, 0) * EDSCALE);
 			value->connect("value_changed", callable_mp(this, &EditorNode::_rome_snap_changed).bind(i == 1));
-			snap->add_child(value);
+			line->add_child(value);
 		}
 	};
 	auto geometry = [this, &tool](Control *row) {
@@ -267,6 +453,40 @@ void EditorNode::_rome_create_ribbon() {
 	rome_color_picker->hide();
 	ribbon->add_child(rome_color_picker);
 	rome_color_picker->connect("color_changed", callable_mp(this, &EditorNode::_rome_color_changed));
+	// Studio's split tools: the icon runs the default action, the arrow offers the variants.
+	auto entry = [](const String &p_label, const Callable &p_action) {
+		RomeToolMenuItem item;
+		item.label = p_label;
+		item.action = p_action;
+		return item;
+	};
+	const Callable emit = callable_mp(this, &EditorNode::_rome_emit_action);
+	const Callable create = callable_mp(this, &EditorNode::_rome_create_node);
+	rome_tool_menus["Pieza"] = { entry("Bloque", emit.bind("insert_part", 0)), entry("Esfera", emit.bind("insert_part", 1)), entry("Cilindro", emit.bind("insert_part", 2)), entry(String::utf8("Cuña"), emit.bind("insert_part", 3)), entry(String::utf8("Cuña de esquina"), emit.bind("insert_part", 4)) };
+	rome_tool_menus["GUI"] = { entry("ScreenGui", create.bind("ScreenGui")), entry("SurfaceGui", create.bind("SurfaceGui")), entry("BillboardGui", create.bind("BillboardGui")) };
+	rome_tool_menus["Script"] = { entry("Script", create.bind("ServerScript")), entry("LocalScript", create.bind("LocalScript")), entry("ModuleScript", create.bind("ModuleScript")) };
+	Vector<RomeToolMenuItem> material_items;
+	for (int i = 0; i < 7; i++) {
+		material_items.push_back(entry(materials[i], callable_mp(this, &EditorNode::_rome_material_changed).bind(i)));
+	}
+	rome_tool_menus["Material"] = material_items;
+	const char *color_names[] = { "Blanco", "Gris piedra", "Gris oscuro", "Negro", "Rojo", "Naranja", "Amarillo", "Verde lima", "Verde", "Azul", "Celeste", "Morado", "Rosa", "Marrón" };
+	const char *color_values[] = { "f2f3f3", "a3a2a5", "635f62", "1b2a35", "c4281c", "da8541", "f5cd30", "a4bd47", "287f47", "0d69ac", "6e99ca", "6b327c", "e8bac8", "7c5c46" };
+	Vector<RomeToolMenuItem> color_items;
+	for (int i = 0; i < 14; i++) {
+		RomeToolMenuItem item = entry(String::utf8(color_names[i]), callable_mp(this, &EditorNode::_rome_color_changed).bind(Color::html(color_values[i])));
+		item.swatch = Color::html(color_values[i]);
+		item.has_swatch = true;
+		color_items.push_back(item);
+	}
+	color_items.push_back(entry(String::utf8("Más colores..."), callable_mp(this, &EditorNode::_rome_open_color)));
+	rome_tool_menus["Color"] = color_items;
+	rome_tool_menus["Grupo"] = { entry("Agrupar como modelo (Ctrl+G)", emit.bind("group", Variant())), entry("Agrupar como carpeta (Ctrl+Alt+G)", emit.bind("group_folder", Variant())), entry("Desagrupar (Ctrl+U)", emit.bind("ungroup", Variant())) };
+	rome_tool_menus["Bloquear"] = { entry("Bloquear", emit.bind("lock_set", true)), entry("Desbloquear", emit.bind("lock_set", false)) };
+	rome_tool_menus["Anclar"] = { entry("Anclar", emit.bind("anchor_set", true)), entry("Desanclar", emit.bind("anchor_set", false)) };
+	for (const char *id : { "Material", "Color", "Grupo", "Bloquear", "Anclar" }) {
+		rome_selection_tools.insert(id);
+	}
 	auto appearance = [this, &tool](Control *row) {
 		tool(row, "Material", "StudioMaterial", callable_mp(this, &EditorNode::_rome_open_material));
 		tool(row, "Color", "StudioColor", callable_mp(this, &EditorNode::_rome_open_color));
@@ -336,4 +556,6 @@ void EditorNode::_rome_create_ribbon() {
 	}
 	_rome_rebuild_custom_tabs();
 	_rome_ribbon_tab_changed(0);
+	editor_selection->connect("selection_changed", callable_mp(this, &EditorNode::_rome_selection_changed));
+	_rome_selection_changed();
 }

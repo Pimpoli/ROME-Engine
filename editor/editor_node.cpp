@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "editor_node.h"
+#include "editor/rome_update_manager.h"
 
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
@@ -436,6 +437,10 @@ void EditorNode::shortcut_input(const Ref<InputEvent> &p_event) {
 
 	Ref<InputEventKey> k = p_event;
 	if ((k.is_valid() && k->is_pressed() && !k->is_echo()) || Object::cast_to<InputEventShortcut>(*p_event)) {
+		if (_rome_shortcut_input(p_event)) {
+			get_tree()->get_root()->set_input_as_handled();
+			return;
+		}
 		bool is_handled = true;
 		if (ED_IS_SHORTCUT("editor/filter_files", p_event)) {
 			FileSystemDock::get_singleton()->focus_on_filter();
@@ -785,6 +790,15 @@ void EditorNode::_rome_set_3d_tool(int p_mode) {
 	Node3DEditor *editor = Node3DEditor::get_singleton();
 	if (editor) {
 		editor->set_tool_mode((Node3DEditor::ToolMode)p_mode);
+	}
+	if (rome_pages_row) {
+		TypedArray<Node> tools = rome_pages_row->find_children("Tool*", "Button", true, false);
+		for (int i = 0; i < tools.size(); i++) {
+			Button *tool = Object::cast_to<Button>(tools[i]);
+			if (tool && tool->has_meta("rome_tool_mode")) {
+				tool->set_pressed_no_signal(int(tool->get_meta("rome_tool_mode")) == p_mode);
+			}
+		}
 	}
 }
 
@@ -4089,6 +4103,9 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 		case HELP_COMMUNITY: {
 			OS::get_singleton()->shell_open("https://godotengine.org/community");
 		} break;
+		case HELP_CHECK_UPDATES: {
+			ROMEUpdateManager::install(gui_base)->show_update_dialog();
+		} break;
 		case HELP_ABOUT: {
 			if (!about) {
 				about = memnew(EditorAbout);
@@ -4859,6 +4876,10 @@ void EditorNode::_set_main_scene_state(const Dictionary &p_state) {
 	ScriptEditor::get_singleton()->set_scene_root_script(editor_data.get_scene_root_script(editor_data.get_edited_scene()));
 	editor_data.notify_edited_scene_changed();
 	emit_signal(SNAME("scene_changed"));
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		// Opening a scene restores its saved Node3DEditor state; the ribbon's snap stays authoritative.
+		callable_mp(this, &EditorNode::_rome_apply_snap).call_deferred();
+	}
 
 	// Reset SDFGI after everything else so that any last-second scene modifications will be processed.
 	RenderingServer::get_singleton()->sdfgi_reset();
@@ -5718,6 +5739,10 @@ void EditorNode::_project_run_stopped() {
 	if (action_on_stop == ACTION_ON_STOP_CLOSE_BUTTOM_PANEL) {
 		bottom_panel->hide_bottom_panel();
 	}
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && editor_main_screen->get_current_tab_control() != ScriptEditor::get_singleton() && Object::cast_to<Node3D>(editor_data.get_edited_scene_root())) {
+		// Studio returns to the edited world when a test stops.
+		EditorInterface::get_singleton()->set_main_screen_editor("3D");
+	}
 }
 
 void EditorNode::notify_all_debug_sessions_exited() {
@@ -6560,18 +6585,80 @@ void EditorNode::_load_editor_layout() {
 
 		ep.step(TTR("Editor layout ready."), 5, true);
 	}
-	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && int(EditorSettings::get_singleton()->get_project_metadata("rome", "workspace_revision", 0)) < 4) {
-		editor_dock_manager->load_docks_from_config(default_layout, "docks", true);
-		for (const String &name : { String("Audio"), String("Animation"), String("Shader Editor") }) {
-			EditorDock *dock = editor_dock_manager->get_dock_by_name(TTR(name));
-			if (dock) { editor_dock_manager->close_dock(dock); }
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && int(EditorSettings::get_singleton()->get_project_metadata("rome", "workspace_revision", 0)) < 5) {
+		// Migrate Output and the old default Resources location. Resetting the
+		// entire layout would erase the user's dock arrangement and preferences.
+		Ref<ConfigFile> migrated_layout = config;
+		if (err != OK) {
+			migrated_layout.instantiate();
+			editor_dock_manager->save_docks_to_config(migrated_layout, "docks");
 		}
-		Dictionary viewport_state;
-		viewport_state["show_grid"] = false;
-		viewport_state["show_origin"] = false;
-		Node3DEditor::get_singleton()->set_state(viewport_state);
-		bottom_panel->hide_bottom_panel();
-		EditorSettings::get_singleton()->set_project_metadata("rome", "workspace_revision", 4);
+		const String output_key = log->get_effective_layout_key();
+		const String resources_key = "ROMEAssets";
+		const String right_bottom_key = DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_BR);
+		Dictionary floating = migrated_layout->get_value("docks", "dock_floating", Dictionary());
+		const Vector<String> right_bottom_names = String(migrated_layout->get_value("docks", right_bottom_key, "")).split(",", false);
+		// Follow the old ROME default only; retain a user's custom resource panel
+		// position or floating window instead of moving it unconditionally.
+		const bool move_default_resources = right_bottom_names.has(resources_key) && !floating.has(resources_key);
+		for (int i = -1; i < EditorDock::DOCK_SLOT_MAX; i++) {
+			const String key = DockTabContainer::get_config_key(i);
+			if (!migrated_layout->has_section_key("docks", key)) {
+				continue;
+			}
+			Vector<String> names = String(migrated_layout->get_value("docks", key)).split(",", false);
+			const int old_index = names.find(output_key);
+			const bool move_resources_here = move_default_resources && key == right_bottom_key;
+			if (old_index < 0 && !move_resources_here) {
+				continue;
+			}
+			int selected = migrated_layout->get_value("docks", key + "_selected_tab_idx", -1);
+			if (old_index >= 0) {
+				names.remove_at(old_index);
+				if (selected >= old_index) {
+					selected = MAX(-1, selected - 1);
+				}
+			}
+			if (move_resources_here) {
+				const int resources_index = names.find(resources_key);
+				if (resources_index >= 0) {
+					names.remove_at(resources_index);
+					if (selected >= resources_index) {
+						selected = MAX(-1, selected - 1);
+					}
+				}
+			}
+			migrated_layout->set_value("docks", key, String(",").join(names));
+			migrated_layout->set_value("docks", key + "_selected_tab_idx", selected);
+		}
+		const String bottom_key = DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_BOTTOM);
+		Vector<String> bottom_names = String(migrated_layout->get_value("docks", bottom_key, "")).split(",", false);
+		if (move_default_resources && !bottom_names.has(resources_key)) {
+			bottom_names.insert(0, resources_key);
+		}
+		const String other_panels = String(",").join(bottom_names);
+		migrated_layout->set_value("docks", bottom_key, output_key + (other_panels.is_empty() ? String() : "," + other_panels));
+		migrated_layout->set_value("docks", bottom_key + "_selected_tab_idx", 0);
+		floating.erase(output_key);
+		migrated_layout->set_value("docks", "dock_floating", floating);
+		Array closed = migrated_layout->get_value("docks", "dock_closed", Array());
+		closed.erase(output_key);
+		migrated_layout->set_value("docks", "dock_closed", closed);
+		Dictionary offsets = migrated_layout->get_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", Dictionary());
+		offsets[output_key] = -150;
+		migrated_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", offsets);
+		editor_dock_manager->load_docks_from_config(migrated_layout, "docks", true);
+		bottom_panel->load_layout_from_config(migrated_layout, EDITOR_NODE_CONFIG_SECTION);
+		// Emit the bottom-panel selection change so the center split expands too.
+		bottom_panel->set_current_tab(-1);
+		bottom_panel->set_current_tab(bottom_panel->get_tab_idx_from_control(log));
+		bottom_panel->set_bottom_panel_offset(-150 * EDSCALE);
+		center_split->set_split_offset(-150 * EDSCALE);
+		EditorSettings::get_singleton()->set_project_metadata("rome", "workspace_revision", 5);
+		save_editor_layout_delayed();
+	}
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		callable_mp(this, &EditorNode::_rome_prefer_world_view).call_deferred();
 	}
 	load_editor_layout_done = true;
 }
@@ -7003,7 +7090,8 @@ void EditorNode::_restart_editor(bool p_goto_project_manager) {
 
 void EditorNode::_scene_tab_closed(int p_tab) {
 	Node *closing_scene = editor_data.get_edited_scene_root(p_tab);
-	if (closing_scene && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+	// While the editor itself closes, its tabs close one by one; only a user closing the main tab leaves the project.
+	if (closing_scene && !_is_closing_editor() && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
 		const String main_path = ResourceUID::ensure_path(GLOBAL_GET("application/run/main_scene"));
 		if (!main_path.is_empty() && closing_scene->get_scene_file_path() == main_path) {
 			_menu_option_confirm(PROJECT_QUIT_TO_PROJECT_MANAGER, false);
@@ -8409,6 +8497,7 @@ void EditorNode::_build_help_menu(bool p_dark_mode) {
 #else
 	help_menu->add_icon_shortcut(get_editor_theme_native_menu_icon(SNAME("Godot"), menu_type == MENU_TYPE_GLOBAL, p_dark_mode), ED_GET_SHORTCUT("editor/about"), HELP_ABOUT);
 #endif
+	help_menu->add_item("Actualizaciones de ROME...", HELP_CHECK_UPDATES);
 }
 
 void EditorNode::_add_to_main_menu(const String &p_name, PopupMenu *p_menu) {
@@ -9956,24 +10045,26 @@ EditorNode::EditorNode() {
 		const String shader_key = ShaderEditorPlugin::get_singleton()->get_shader_dock()->get_effective_layout_key();
 
 		Dictionary offsets;
-		offsets[output_key] = -270;
+		offsets[output_key] = -150;
 		offsets[audio_key] = -450;
 		offsets[shader_key] = -348;
 		default_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", offsets);
 	}
 
-	// Studio's default workspace: properties left, explorer and output right.
+	// Studio's default workspace: properties left, explorer right, output under the world.
 	for (int i = 0; i < 8; i++) {
 		default_layout->set_value(docks_section, DockTabContainer::get_config_key(i), "");
 	}
 	default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_UL), InspectorDock::get_singleton()->get_effective_layout_key());
 	default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_UR), SceneTreeDock::get_singleton()->get_effective_layout_key());
-	default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_RIGHT_BR), log->get_effective_layout_key());
+	default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_BOTTOM), log->get_effective_layout_key());
+	default_layout->set_value(docks_section, DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_BOTTOM) + "_selected_tab_idx", 0);
 	default_layout->set_value(docks_section, "dock_hsplit_1", 224);
 	default_layout->set_value(docks_section, "dock_hsplit_4", -232);
-	default_layout->set_value(docks_section, "dock_split_4", 150);
+	default_layout->set_value(docks_section, "dock_split_4", 0);
 
 	_update_layouts_menu();
+	ROMEUpdateManager::install(gui_base)->set_quit_callback(callable_mp(this, &EditorNode::trigger_menu_option).bind(SCENE_QUIT, false));
 }
 
 EditorNode::~EditorNode() {

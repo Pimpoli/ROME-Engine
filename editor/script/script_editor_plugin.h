@@ -451,6 +451,7 @@ public:
 	bool can_open_file(const String &p_file) const;
 	Error close_file(const String &p_file);
 	void request_close_resource(const Ref<Resource> &p_resource);
+	void rome_close_documents(const Ref<Resource> &p_keep);
 
 	void ensure_select_current();
 
@@ -548,6 +549,7 @@ public:
 	Ref<Resource> open_file(const String &p_file) { return script_container->open_file(p_file); }
 	Error close_file(const String &p_file) { return script_container->close_file(p_file); }
 	void request_close_resource(const Ref<Resource> &p_resource) { script_container->request_close_resource(p_resource); }
+	void rome_close_documents(const Ref<Resource> &p_keep) { script_container->rome_close_documents(p_keep); }
 
 	_FORCE_INLINE_ bool edit(const Ref<Resource> &p_resource, bool p_grab_focus = true) { return edit(p_resource, -1, 0, p_grab_focus); }
 	bool edit(const Ref<Resource> &p_resource, int p_line, int p_col, bool p_grab_focus = true) { return script_container->edit(p_resource, p_line, p_col, p_grab_focus); }

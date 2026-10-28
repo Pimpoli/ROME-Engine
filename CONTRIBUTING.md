@@ -46,7 +46,7 @@ El resto del árbol conserva la estructura de Godot. La
 [documentación técnica de Godot](https://contributing.godotengine.org/)
 sirven de referencia para el núcleo y el estilo de C++.
 El origen del código y las actualizaciones del núcleo se describen en
-[UPSTREAM.md](UPSTREAM.md). El repositorio publica una instantánea de un derivado
+[UPSTREAM.md](rome/UPSTREAM.md). El repositorio publica una instantánea de un derivado
 de Godot; no es un fork registrado en la red de repositorios de GitHub.
 
 ## Preparar un cambio

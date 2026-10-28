@@ -69,6 +69,8 @@ private:
 	Button *scene_tab_add = nullptr;
 	Control *scene_tab_add_ph = nullptr;
 	TabBar *rome_document_tabs = nullptr;
+	PopupMenu *rome_document_menu = nullptr;
+	int rome_menu_tab = -1;
 	Vector<Ref<Script>> rome_scripts;
 	double rome_refresh_elapsed = 0.0;
 	bool rome_script_signals_connected = false;
@@ -76,6 +78,7 @@ private:
 	void _rome_document_selected(int p_tab);
 	void _rome_document_closed(int p_tab);
 	void _rome_document_input(const Ref<InputEvent> &p_event);
+	void _rome_document_menu_pressed(int p_id);
 	void _rome_script_closed(const Ref<Script> &p_script);
 	void _rome_show_scene();
 	Array _rome_get_documents();

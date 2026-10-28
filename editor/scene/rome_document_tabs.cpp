@@ -27,10 +27,20 @@ void EditorSceneTabs::_rome_update_documents() {
 	if (rome_document_tabs->get_tab_count() != count) {
 		rome_document_tabs->set_tab_count(count);
 	}
+	auto apply = [this](int p_tab, const String &p_title, const Ref<Texture2D> &p_icon, const String &p_tooltip) {
+		// This runs several times a second; unchanged tabs must not relayout the bar.
+		if (rome_document_tabs->get_tab_title(p_tab) != p_title) {
+			rome_document_tabs->set_tab_title(p_tab, p_title);
+		}
+		if (rome_document_tabs->get_tab_icon(p_tab) != p_icon) {
+			rome_document_tabs->set_tab_icon(p_tab, p_icon);
+		}
+		if (rome_document_tabs->get_tab_tooltip(p_tab) != p_tooltip) {
+			rome_document_tabs->set_tab_tooltip(p_tab, p_tooltip);
+		}
+	};
 	for (int i = 0; i < scenes; i++) {
-		rome_document_tabs->set_tab_title(i, scene_tabs->get_tab_title(i));
-		rome_document_tabs->set_tab_icon(i, scene_tabs->get_tab_icon(i));
-		rome_document_tabs->set_tab_tooltip(i, EditorNode::get_editor_data().get_scene_path(i));
+		apply(i, scene_tabs->get_tab_title(i), scene_tabs->get_tab_icon(i), EditorNode::get_editor_data().get_scene_path(i));
 	}
 	for (int i = 0; i < rome_scripts.size(); i++) {
 		const Ref<Script> script = rome_scripts[i];
@@ -38,15 +48,18 @@ void EditorSceneTabs::_rome_update_documents() {
 		if (name.is_empty()) {
 			name = script->get_path().get_file().get_basename();
 		}
-		const String type = script->get_meta("rome_script_type", script->get_path().get_extension());
-		String label = name + (type.is_empty() ? String() : "." + type);
+		// Studio names a script tab after the object; its class shows as the icon.
+		const String type = script->get_meta("rome_script_type", String());
+		String label = name;
 		ScriptEditorBase *editor = scripts->get_script_container()->get_resource_editor(script);
 		if (editor && editor->is_unsaved()) {
-			label += " *";
+			label += "(*)";
 		}
-		rome_document_tabs->set_tab_title(scenes + i, label);
-		rome_document_tabs->set_tab_icon(scenes + i, get_editor_theme_icon("Script"));
-		rome_document_tabs->set_tab_tooltip(scenes + i, script->get_path());
+		Ref<Texture2D> icon = type.is_empty() ? Ref<Texture2D>() : EditorNode::get_singleton()->get_class_icon(type);
+		if (icon.is_null()) {
+			icon = get_editor_theme_icon("Script");
+		}
+		apply(scenes + i, label, icon, name + (type.is_empty() ? String() : " (" + type + ")") + "\n" + script->get_path());
 	}
 	int selected = scene_tabs->get_current_tab();
 	if (EditorNode::get_editor_main_screen()->get_current_tab_control() == scripts) {
@@ -114,13 +127,40 @@ void EditorSceneTabs::_rome_script_closed(const Ref<Script> &p_script) {
 
 void EditorSceneTabs::_rome_document_input(const Ref<InputEvent> &p_event) {
 	Ref<InputEventMouseButton> mouse = p_event;
-	if (mouse.is_valid() && mouse->is_pressed() && mouse->get_button_index() == MouseButton::RIGHT) {
-		const int index = rome_document_tabs->get_tab_idx_at_point(mouse->get_position());
-		if (index >= 0 && index < scene_tabs->get_tab_count()) {
+	if (mouse.is_null() || !mouse->is_pressed()) {
+		return;
+	}
+	const int index = rome_document_tabs->get_tab_idx_at_point(mouse->get_position());
+	if (index < 0) {
+		return;
+	}
+	if (mouse->get_button_index() == MouseButton::MIDDLE) {
+		rome_document_tabs->accept_event();
+		_rome_document_closed(index);
+	} else if (mouse->get_button_index() == MouseButton::RIGHT) {
+		PopupMenu *menu = scene_tabs_context_menu;
+		if (index < scene_tabs->get_tab_count()) {
 			_update_context_menu(index);
-			scene_tabs_context_menu->set_position(rome_document_tabs->get_screen_position() + mouse->get_position());
-			scene_tabs_context_menu->popup();
+		} else {
+			rome_menu_tab = index;
+			menu = rome_document_menu;
+			menu->reset_size();
 		}
+		menu->set_position(rome_document_tabs->get_screen_position() + mouse->get_position());
+		menu->popup();
+	}
+}
+
+void EditorSceneTabs::_rome_document_menu_pressed(int p_id) {
+	const int script_index = rome_menu_tab - scene_tabs->get_tab_count();
+	if (script_index < 0 || script_index >= rome_scripts.size()) {
+		return;
+	}
+	ScriptEditor *scripts = ScriptEditor::get_singleton();
+	if (p_id == 0) {
+		scripts->request_close_resource(rome_scripts[script_index]);
+	} else {
+		scripts->rome_close_documents(p_id == 1 ? Ref<Resource>(rome_scripts[script_index]) : Ref<Resource>());
 	}
 }
 
@@ -130,11 +170,15 @@ Array EditorSceneTabs::_rome_get_documents() {
 	if (!rome_document_tabs) {
 		return result;
 	}
+	const int scenes = scene_tabs->get_tab_count();
 	for (int i = 0; i < rome_document_tabs->get_tab_count(); i++) {
 		Dictionary item;
-		item["kind"] = i < scene_tabs->get_tab_count() ? "scene" : "script";
+		const bool scene = i < scenes;
+		item["kind"] = scene ? "scene" : "script";
 		item["label"] = rome_document_tabs->get_tab_title(i);
-		item["path"] = rome_document_tabs->get_tab_tooltip(i);
+		item["path"] = scene ? EditorNode::get_editor_data().get_scene_path(i) : rome_scripts[i - scenes]->get_path();
+		item["type"] = scene ? String() : String(rome_scripts[i - scenes]->get_meta("rome_script_type", String()));
+		item["has_icon"] = rome_document_tabs->get_tab_icon(i).is_valid();
 		item["active"] = rome_document_tabs->get_current_tab() == i;
 		result.push_back(item);
 	}

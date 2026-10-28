@@ -1924,7 +1924,11 @@ void Node3DEditorViewport::_surface_focus_exit() {
 }
 
 bool Node3DEditorViewport::_is_node_locked(const Node *p_node) const {
-	return p_node->get_meta("_edit_lock_", false);
+	if (p_node->get_meta("_edit_lock_", false)) {
+		return true;
+	}
+	// Studio's Locked parts can be picked from the Explorer, never by clicking the world.
+	return bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && bool(p_node->get("Locked"));
 }
 
 void Node3DEditorViewport::_list_select(Ref<InputEventMouseButton> b) {

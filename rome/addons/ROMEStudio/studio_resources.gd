@@ -29,7 +29,8 @@ func _init() -> void:
 	title = "Recursos"
 	layout_key = "ROMEAssets"
 	closable = true
-	default_slot = EditorDock.DOCK_SLOT_RIGHT_BR
+	default_slot = EditorDock.DOCK_SLOT_BOTTOM
+	available_layouts = EditorDock.DOCK_LAYOUT_ALL
 	var layout := VBoxContainer.new()
 	add_child(layout)
 	var actions := HBoxContainer.new()
@@ -392,6 +393,9 @@ func _insert_selected() -> void:
 	if parent == null:
 		return
 	var instance := packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
+	var workspace := root.get_node_or_null("Workspace")
+	if instance is Node3D and workspace != null and (parent == workspace or workspace.is_ancestor_of(parent)):
+		preload("res://addons/ROMEStudio/studio_placement.gd").place(instance as Node3D, parent, root)
 	var undo := plugin.get_undo_redo()
 	undo.create_action("Insertar " + path.get_file(), UndoRedo.MERGE_DISABLE, root)
 	undo.add_do_method(parent, "add_child", instance, true)

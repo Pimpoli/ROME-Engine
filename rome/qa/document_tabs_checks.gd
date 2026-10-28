@@ -30,8 +30,8 @@ static func run(root: Node) -> Dictionary:
 	var server_index := _index(documents, "script", server_script.resource_path)
 	if not _expect(local_index >= 0 and server_index >= 0, "Both Luau scripts appear beside scenes", report):
 		return report
-	_expect(str(documents[local_index].label) == str(local_node.name) + ".LocalScript", "LocalScript tab uses its logical name and type", report)
-	_expect(str(documents[server_index].label) == str(server_node.name) + ".ServerScript", "ServerScript tab uses its logical name and type", report)
+	_expect(str(documents[local_index].label) == str(local_node.name) and documents[local_index].type == "LocalScript" and documents[local_index].has_icon, "LocalScript tab shows its logical name with its type icon", report)
+	_expect(str(documents[server_index].label) == str(server_node.name) and documents[server_index].type == "ServerScript" and documents[server_index].has_icon, "ServerScript tab shows its logical name with its type icon", report)
 	tabs.call("rome_select_document", local_index)
 	await _frames(4)
 	_expect(scripts.get_current_script() == local_script and scripts.is_visible_in_tree(), "Selecting a script opens its exact code document", report)
@@ -84,7 +84,7 @@ static func run(root: Node) -> Dictionary:
 	await _frames(3)
 	documents = tabs.call("rome_get_documents")
 	local_index = _index(documents, "script", local_script.resource_path)
-	_expect(local_index >= 0 and str(documents[local_index].label).ends_with(" *"), "Unsaved script tabs show a dirty marker", report)
+	_expect(local_index >= 0 and str(documents[local_index].label).ends_with("(*)"), "Unsaved script tabs show a dirty marker", report)
 	tabs.call("rome_close_document", local_index)
 	await _frames(3)
 	var prompt := _close_prompt(scripts, prefix)

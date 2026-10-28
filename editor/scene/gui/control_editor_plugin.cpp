@@ -1374,17 +1374,19 @@ ControlEditorToolbar *ControlEditorToolbar::singleton = nullptr;
 // Editor plugin.
 
 void ControlOffsetTransformPreview::edit(Control *p_control) {
-	if (p_control == selected_control) {
+	if (p_control == selected_control && (!p_control || p_control->get_instance_id() == selected_control_id)) {
 		return;
 	}
 
 	const Callable update_overlays = callable_mp(plugin, &EditorPlugin::update_overlays);
 
-	if (selected_control) {
+	// The previous control may already be freed (for example by Undo in the same frame).
+	if (selected_control && ObjectDB::get_instance(selected_control_id) == selected_control) {
 		selected_control->disconnect(SceneStringName(draw), update_overlays);
 	}
 
 	selected_control = p_control;
+	selected_control_id = p_control ? p_control->get_instance_id() : ObjectID();
 
 	if (selected_control) {
 		selected_control->connect(SceneStringName(draw), update_overlays);
@@ -1394,7 +1396,7 @@ void ControlOffsetTransformPreview::edit(Control *p_control) {
 }
 
 void ControlOffsetTransformPreview::forward_canvas_draw_over_viewport(Control *p_overlay) const {
-	if (!selected_control || !selected_control->is_offset_transform_enabled() || selected_control->is_offset_transform_visual_only()) {
+	if (!selected_control || ObjectDB::get_instance(selected_control_id) != selected_control || !selected_control->is_offset_transform_enabled() || selected_control->is_offset_transform_visual_only()) {
 		return;
 	}
 

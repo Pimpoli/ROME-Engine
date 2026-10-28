@@ -33,6 +33,20 @@ En el primer inicio, el editor extrae sus componentes a una **caché del usuario
 identificada por versión y paquete. Las siguientes ejecuciones reutilizan esa
 copia. Este paquete no utiliza un asistente de instalación.
 
+### Actualizaciones
+
+A partir de la versión siguiente a la 0.1.0-alpha.1, ROME se actualiza solo:
+al arrancar consulta las versiones publicadas en Releases, descarga en segundo
+plano el ejecutable de tu plataforma y comprueba su SHA-256. La versión nueva se
+instala al cerrar el editor, o al momento con **Ayuda > Actualizaciones de ROME >
+Actualizar y reiniciar**, que reabre la misma experiencia. Si algo falla, ROME
+vuelve a abrir la versión anterior. Quien tenga la 0.1.0-alpha.1 descarga la
+siguiente a mano una sola vez.
+
+GodotLuau viaja dentro de ROME y se actualiza con él; su actualizador propio
+queda desactivado en las experiencias de ROME para no instalar una compilación
+que no sea la adaptada.
+
 ## Base del motor
 
 ROME conserva el núcleo de Godot y sus escenas reutilizables, mientras desarrolla
@@ -45,17 +59,25 @@ automáticamente.
 **0.1.0-alpha.1 es la versión pública de ROME**; 4.8 beta 1 identifica la base
 técnica de Godot. El repositorio publica una instantánea del código derivado y
 no está registrado como fork en la red de repositorios de GitHub. El origen y
-el proceso para integrar cambios del núcleo se documentan en [UPSTREAM.md](UPSTREAM.md).
+el proceso para integrar cambios del núcleo se documentan en [UPSTREAM.md](rome/UPSTREAM.md).
 
 ## Qué incluye
 
 - **Inicio de experiencias** con las plantillas Baseplate, En blanco y Classic Obby.
 - **Barra de herramientas** con Inicio, Avatar, UI, Script, Modelo y Plugins.
-  El botón **+** crea pestañas personalizadas con herramientas, separadores y
-  opciones para renombrar, duplicar y reorganizar.
-- **Pestañas compartidas para escenas y scripts**. Los scripts usan su nombre
-  lógico y tipo, como `ObbyClient.LocalScript`; seleccionar una escena vuelve a
-  su mundo y seleccionar un script abre su código.
+  Pieza, Script, GUI, Material, Color, Grupo, Bloquear y Anclar tienen su menú
+  desplegable; el ajuste de movimiento y giro se activa con su casilla, y los
+  atajos son los de Studio (Ctrl+1…5, Ctrl+L, Ctrl+G, Ctrl+U). El botón **+**
+  crea pestañas personalizadas con herramientas, separadores y opciones para
+  renombrar, duplicar y reorganizar.
+- **Pestañas compartidas para escenas y scripts**. Cada script muestra su nombre
+  con el icono de su tipo; seleccionar una escena vuelve a su mundo y
+  seleccionar un script abre su código. Clic central cierra la pestaña.
+- **Insertar objeto** con buscador, categorías y objetos recientes, también desde
+  el **+** que aparece al pasar por cada fila del Explorador. Las piezas nuevas
+  aparecen delante de la cámara.
+- **Propiedades por secciones** (Datos, Apariencia, Colisión, Comportamiento…)
+  con **Atributos** que se agregan y eliminan desde el panel.
 - **Recursos organizados por carpetas**, con creación de carpetas y acceso al
   navegador de archivos completo. `Scenes` se muestra con el nombre traducido
   del editor, como **Escenas**, sin cambiar sus rutas. Los scripts se organizan
@@ -192,7 +214,7 @@ el tipo del script.
 - [Cómo contribuir](CONTRIBUTING.md): estructura, cambios y comprobaciones.
 - [Guía técnica de ROME](rome/README.md): construcción, empaquetado y recursos.
 - [Estado y notas de implementación](rome/PROGRESS.md).
-- [Origen de los fuentes y mantenimiento de la base](UPSTREAM.md).
+- [Origen de los fuentes y mantenimiento de la base](rome/UPSTREAM.md).
 - [Documentación de GodotLuau](https://github.com/Pimpoli/GodotLuau#readme).
 - [README original de Godot](README.godot.md) y
   [guía original de contribución](CONTRIBUTING.godot.md), conservados como referencia.
@@ -206,6 +228,9 @@ El núcleo heredado de Godot conserva su licencia MIT en
 [LICENSE.txt](LICENSE.txt), sus [autores](AUTHORS.md) y los avisos de dependencias
 en [COPYRIGHT.txt](COPYRIGHT.txt). GodotLuau mantiene su propia licencia y créditos
 en su repositorio y en los paquetes que lo incorporan.
+
+Las aportaciones propias de ROME se distribuyen bajo la licencia MIT de
+[LICENSE](LICENSE). La instantánea de GodotLuau conserva su [licencia propia](rome/vendor/GodotLuau/LICENSE).
 
 ROME es un proyecto de **Rocket Meteor / PimpoliDev**. Los cambios de interfaz
 y marca no eliminan las atribuciones del software del que deriva.

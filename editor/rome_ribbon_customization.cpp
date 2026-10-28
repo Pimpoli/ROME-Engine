@@ -2,6 +2,7 @@
 
 #include "core/object/callable_mp.h"
 #include "core/input/input_event.h"
+#include "core/io/image.h"
 #include "editor/editor_string_names.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
@@ -15,6 +16,7 @@
 #include "scene/gui/separator.h"
 #include "scene/gui/texture_rect.h"
 #include "scene/gui/tree.h"
+#include "scene/resources/image_texture.h"
 #include "scene/resources/style_box_flat.h"
 #include "servers/display/display_server.h"
 
@@ -49,10 +51,14 @@ Button *EditorNode::_rome_make_tool(Control *p_row, const String &p_id) {
 	if (!p_row) { return nullptr; }
 	for (const RomeRibbonCommand &command : rome_ribbon_commands) {
 		if (command.id != p_id) { continue; }
+		const bool has_menu = rome_tool_menus.has(p_id);
 		Button *button = memnew(Button);
 		button->set_name("Tool" + p_id.validate_node_name());
 		button->set_meta("rome_tool_id", p_id);
-		button->set_custom_minimum_size(Size2(MAX(48, MIN(76, command.label.length() * 6 + 8)), 54) * EDSCALE);
+		if (rome_selection_tools.has(p_id)) {
+			button->set_meta("rome_needs_selection", true);
+		}
+		button->set_custom_minimum_size(Size2(MAX(48, MIN(76, command.label.length() * 6 + 8)) + (has_menu ? 12 : 0), 54) * EDSCALE);
 		button->set_flat(true);
 		button->set_focus_mode(Control::FOCUS_NONE);
 		button->set_tooltip_text(command.enabled ? command.label : command.label + "\nEsta herramienta no esta disponible en ROME todavia.");
@@ -83,6 +89,44 @@ Button *EditorNode::_rome_make_tool(Control *p_row, const String &p_id) {
 		caption->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
 		caption->add_theme_font_size_override("font_size", 11 * EDSCALE);
 		inside->add_child(caption);
+		if (has_menu && command.enabled) {
+			PopupMenu *menu = memnew(PopupMenu);
+			const Vector<RomeToolMenuItem> &items = rome_tool_menus[p_id];
+			for (int i = 0; i < items.size(); i++) {
+				if (items[i].has_swatch) {
+					Ref<Image> swatch = Image::create_empty(14 * EDSCALE, 14 * EDSCALE, false, Image::FORMAT_RGBA8);
+					swatch->fill(items[i].swatch);
+					menu->add_icon_item(ImageTexture::create_from_image(swatch), items[i].label, i);
+				} else {
+					menu->add_item(items[i].label, i);
+				}
+			}
+			menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_rome_tool_menu_selected).bind(p_id));
+			button->add_child(menu);
+			Button *arrow = memnew(Button);
+			arrow->set_name("Arrow");
+			arrow->set_flat(true);
+			arrow->set_focus_mode(Control::FOCUS_NONE);
+			arrow->set_tooltip_text(String::utf8("Más opciones de ") + command.label);
+			arrow->set_anchors_preset(Control::PRESET_TOP_RIGHT);
+			arrow->set_offset(SIDE_LEFT, -15 * EDSCALE);
+			arrow->set_offset(SIDE_TOP, 6 * EDSCALE);
+			arrow->set_offset(SIDE_RIGHT, -1 * EDSCALE);
+			arrow->set_offset(SIDE_BOTTOM, 30 * EDSCALE);
+			arrow->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_rome_show_tool_menu).bind(button, menu));
+			button->add_child(arrow);
+			TextureRect *arrow_icon = memnew(TextureRect);
+			arrow_icon->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
+			arrow_icon->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
+			arrow_icon->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+			arrow_icon->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
+			arrow_icon->set_texture(theme->get_icon(SNAME("GuiDropdown"), EditorStringName(EditorIcons)));
+			arrow->add_child(arrow_icon);
+			RomeRibbonIcon arrow_entry;
+			arrow_entry.texture = arrow_icon;
+			arrow_entry.icon = SNAME("GuiDropdown");
+			rome_ribbon_icons.push_back(arrow_entry);
+		}
 		return button;
 	}
 	return nullptr;
@@ -383,6 +427,7 @@ void EditorNode::_rome_rebuild_custom_page(int p_tab) {
 	empty->add_child(context);
 	empty->connect("gui_input", callable_mp_static(&rome_tab_context).bind(context));
 	add->connect("gui_input", callable_mp_static(&rome_tab_context).bind(context));
+	_rome_selection_changed();
 }
 
 void EditorNode::_rome_show_tool_picker(int p_tab) {

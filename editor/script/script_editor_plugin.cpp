@@ -3022,6 +3022,16 @@ void DocumentEditorContainer::request_close_resource(const Ref<Resource> &p_reso
 	}
 }
 
+void DocumentEditorContainer::rome_close_documents(const Ref<Resource> &p_keep) {
+	for (int i = tab_container->get_tab_count() - 1; i >= 0; i--) {
+		ScriptEditorBase *editor = Object::cast_to<ScriptEditorBase>(tab_container->get_tab_control(i));
+		if (!editor || editor->get_edited_resource() != p_keep) {
+			script_close_queue.push_back(i);
+		}
+	}
+	_queue_close_tabs();
+}
+
 Error DocumentEditorContainer::close_file(const String &p_file) {
 	for (int i = 0; i < tab_container->get_tab_count(); i++) {
 		ScriptEditorBase *seb = Object::cast_to<ScriptEditorBase>(tab_container->get_tab_control(i));
@@ -4099,6 +4109,12 @@ DocumentEditorContainer::DocumentEditorContainer(bool p_is_main_editor, const St
 	}
 #endif
 	bool initial_state = EditorSettings::get_singleton()->get_project_metadata("show_files_panel", config_section, true);
+	if (config_section == "ScriptEditor" && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && int(EditorSettings::get_singleton()->get_project_metadata("rome", "script_list_revision", 0)) < 1) {
+		// Studio navigates scripts from the document tabs; the list stays one shortcut away.
+		initial_state = false;
+		EditorSettings::get_singleton()->set_project_metadata("show_files_panel", config_section, false);
+		EditorSettings::get_singleton()->set_project_metadata("rome", "script_list_revision", 1);
+	}
 	toggle_files_button->set_pressed_no_signal(initial_state);
 	_toggle_files_pressed(initial_state);
 

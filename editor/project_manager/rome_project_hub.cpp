@@ -8,6 +8,7 @@
 #include "editor/project_manager/project_dialog.h"
 #include "editor/project_manager/project_list.h"
 #include "editor/project_manager/rome_project_template.h"
+#include "editor/rome_update_manager.h"
 #include "editor/themes/editor_scale.h"
 #include "editor/themes/editor_icons.h"
 #include "editor/settings/editor_settings.h"
@@ -26,6 +27,7 @@
 #include "scene/resources/gradient_texture.h"
 #include "scene/resources/style_box_flat.h"
 #include "scene/resources/style_box.h"
+#include "scene/main/scene_tree.h"
 #include "servers/display/display_server.h"
 
 static Ref<StyleBoxFlat> rome_hub_style(const Color &p_color, int p_margin = 12) {
@@ -143,6 +145,8 @@ void ProjectManager::_rome_menu_action(int p_action) {
 		_show_quick_settings();
 	} else if (p_action == 3) {
 		_show_about();
+	} else if (p_action == 4) {
+		ROMEUpdateManager::install(this)->show_update_dialog();
 	}
 }
 
@@ -216,13 +220,15 @@ void ProjectManager::_rome_build_hub() {
 	plugins->add_theme_font_size_override("font_size", 12 * EDSCALE);
 	plugins->connect("pressed", callable_mp(this, &ProjectManager::_show_quick_settings));
 	menu_row->add_child(plugins);
-	Button *help = memnew(Button);
+	MenuButton *help = memnew(MenuButton);
 	help->set_text("Ayuda");
 	help->set_flat(true);
 	help->add_theme_font_size_override("font_size", 12 * EDSCALE);
-	help->connect("pressed", callable_mp(this, &ProjectManager::_show_about));
+	help->get_popup()->add_item("Actualizaciones de ROME...", 4);
+	help->get_popup()->add_item("Acerca de ROME Engine", 3);
+	help->get_popup()->connect("id_pressed", callable_mp(this, &ProjectManager::_rome_menu_action));
 	menu_row->add_child(help);
-	for (Button *menu_button : { static_cast<Button *>(file), plugins, help }) {
+	for (Button *menu_button : { static_cast<Button *>(file), plugins, static_cast<Button *>(help) }) {
 		Ref<StyleBoxFlat> menu_style = rome_hub_style(Color(0, 0, 0, 0), 0);
 		menu_style->set_content_margin(SIDE_LEFT, 7 * EDSCALE);
 		menu_style->set_content_margin(SIDE_RIGHT, 7 * EDSCALE);
@@ -405,4 +411,5 @@ void ProjectManager::_rome_build_hub() {
 	}
 	project_list->connect(ProjectList::SIGNAL_LIST_CHANGED, callable_mp(this, &ProjectManager::_rome_refresh_cards), CONNECT_DEFERRED);
 	_rome_show_page(0);
+	ROMEUpdateManager::install(this)->set_quit_callback(callable_mp(SceneTree::get_singleton(), &SceneTree::quit).bind(0));
 }

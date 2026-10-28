@@ -420,7 +420,10 @@ void EditorLog::_add_log_line(LogMessage &p_message, bool p_replace_previous) {
 		case MSG_TYPE_ERROR: {
 			log->push_color(theme_cache.error_color);
 			Ref<Texture2D> icon = theme_cache.error_icon;
-			log->add_image(icon);
+			// Errors can arrive before the theme cache exists (e.g. extension startup).
+			if (icon.is_valid()) {
+				log->add_image(icon);
+			}
 			log->push_bold();
 			log->add_text(U" ERROR: ");
 			log->pop(); // bold
@@ -429,7 +432,9 @@ void EditorLog::_add_log_line(LogMessage &p_message, bool p_replace_previous) {
 		case MSG_TYPE_WARNING: {
 			log->push_color(theme_cache.warning_color);
 			Ref<Texture2D> icon = theme_cache.warning_icon;
-			log->add_image(icon);
+			if (icon.is_valid()) {
+				log->add_image(icon);
+			}
 			log->push_bold();
 			log->add_text(U" WARNING: ");
 			log->pop(); // bold
@@ -491,7 +496,7 @@ EditorLog::EditorLog() {
 	set_name(TTRC("Output"));
 	set_icon_name("Output");
 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("bottom_panels/toggle_output_bottom_panel", TTRC("Toggle Output Dock"), KeyModifierMask::ALT | Key::O));
-	set_default_slot(EditorDock::DOCK_SLOT_RIGHT_BR);
+	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
 	set_available_layouts(EditorDock::DOCK_LAYOUT_VERTICAL | EditorDock::DOCK_LAYOUT_HORIZONTAL | EditorDock::DOCK_LAYOUT_FLOATING);
 	set_process_shortcut_input(true);
 	set_shortcut_context(this);
@@ -586,7 +591,7 @@ EditorLog::EditorLog() {
 	hbox->add_child(editor_filter->toggle_button);
 	type_filter_map.insert(MSG_TYPE_EDITOR, editor_filter);
 
-	add_message(ROME_VERSION_FULL_NAME " | Rocket Meteor");
+	add_message(ROME_VERSION_FULL_NAME " X Godot Luau | Rocket Meteor");
 
 	eh.errfunc = _error_handler;
 	eh.userdata = this;

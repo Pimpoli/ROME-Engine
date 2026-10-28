@@ -929,8 +929,8 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
 	EDITOR_SETTING_BASIC(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d/secondary_grid_color", Color(0.38, 0.38, 0.38, 0.5), "")
 
 	// Use a similar color to the 2D editor selection.
-	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d/selection_box_color", Color(1.0, 0.5, 0), "", PROPERTY_USAGE_DEFAULT)
-	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d/active_selection_box_color", Color(1.5, 0.75, 0, 1.0), "", PROPERTY_USAGE_DEFAULT)
+	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d/selection_box_color", Color(0.05, 0.55, 1.0), "", PROPERTY_USAGE_DEFAULT)
+	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d/active_selection_box_color", Color(0.1, 0.8, 1.5, 1.0), "", PROPERTY_USAGE_DEFAULT)
 	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d_gizmos/gizmo_colors/instantiated", Color(0.7, 0.7, 0.7, 0.6), "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_RESTART_IF_CHANGED)
 	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d_gizmos/gizmo_colors/joint", Color(0.5, 0.8, 1), "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_RESTART_IF_CHANGED)
 	EDITOR_SETTING_USAGE(Variant::COLOR, PROPERTY_HINT_NONE, "editors/3d_gizmos/gizmo_colors/aabb", Color(0.28, 0.8, 0.82), "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_RESTART_IF_CHANGED)
@@ -996,7 +996,7 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
 	EDITOR_SETTING_BASIC(Variant::INT, PROPERTY_HINT_ENUM, "editors/3d/navigation/zoom_mouse_button", 1, "Left Mouse,Middle Mouse,Right Mouse,Mouse Button 4,Mouse Button 5")
 	EDITOR_SETTING_BASIC(Variant::INT, PROPERTY_HINT_ENUM, "editors/3d/navigation/zoom_style", 0, "Vertical,Horizontal")
 
-	_initial_set("editors/3d/navigation/emulate_numpad", true, true);
+	_initial_set("editors/3d/navigation/emulate_numpad", false, true);
 	_initial_set("editors/3d/navigation/emulate_3_button_mouse", false, true);
 	_initial_set("editors/3d/navigation/warped_mouse_panning", true, true);
 
@@ -1473,12 +1473,20 @@ void EditorSettings::create() {
 		singleton->save_changed_setting = true;
 
 		// Upgrade the initial ROME appearance once; later user changes are retained.
-		if (!singleton->has_setting("rome/studio/appearance_revision")) {
+		const int rome_revision = singleton->has_setting("rome/studio/appearance_revision") ? int(singleton->get("rome/studio/appearance_revision")) : 0;
+		if (rome_revision < 2) {
 			if (int(singleton->get("interface/editor/fonts/main_font_size")) == 14) {
 				singleton->set("interface/editor/fonts/main_font_size", 12);
 			}
 			singleton->set("interface/theme/spacing_preset", "Compact");
-			singleton->set("rome/studio/appearance_revision", 2);
+		}
+		if (rome_revision < 3) {
+			// Studio has no numpad view keys; emulating them turns Ctrl+1..5 into camera views.
+			singleton->set("editors/3d/navigation/emulate_numpad", false);
+			// Studio outlines selected parts in blue.
+			singleton->set("editors/3d/selection_box_color", Color(0.05, 0.55, 1.0));
+			singleton->set("editors/3d/active_selection_box_color", Color(0.1, 0.8, 1.5, 1.0));
+			singleton->set("rome/studio/appearance_revision", 3);
 		}
 
 		print_verbose("EditorSettings: Load OK!");

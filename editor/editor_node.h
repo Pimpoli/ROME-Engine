@@ -65,8 +65,10 @@ class TextureProgressBar;
 class Timer;
 class TextureRect;
 class ButtonGroup;
+class CheckBox;
 class ColorPickerButton;
 class LineEdit;
+class SpinBox;
 class Translation;
 class Tree;
 class VBoxContainer;
@@ -220,6 +222,7 @@ public:
 		HELP_REPORT_A_BUG,
 		HELP_SUGGEST_A_FEATURE,
 		HELP_SEND_DOCS_FEEDBACK,
+		HELP_CHECK_UPDATES,
 		HELP_ABOUT,
 		HELP_SUPPORT_GODOT_DEVELOPMENT,
 
@@ -314,6 +317,16 @@ private:
 		bool enabled = true;
 	};
 	Vector<RomeRibbonCommand> rome_ribbon_commands;
+	struct RomeToolMenuItem {
+		String label;
+		Callable action;
+		Color swatch;
+		bool has_swatch = false;
+	};
+	HashMap<String, Vector<RomeToolMenuItem>> rome_tool_menus;
+	HashSet<String> rome_selection_tools;
+	bool rome_snap_enabled[2] = {};
+	double rome_snap_step[2] = { 1.0, 40.0 };
 	Vector<Button *> rome_ribbon_tabs;
 	Ref<ButtonGroup> rome_ribbon_group;
 	HBoxContainer *rome_tabs_row = nullptr;
@@ -353,6 +366,16 @@ private:
 	void _rome_color_changed(const Color &p_color);
 	void _rome_material_changed(int p_material);
 	void _rome_snap_changed(double p_value, bool p_rotation);
+	void _rome_apply_snap();
+	void _rome_snap_toggled(bool p_enabled, bool p_rotation);
+	void _rome_sync_snap_controls();
+	void _rome_emit_action(const String &p_action, const Variant &p_payload);
+	void _rome_show_tool_menu(Button *p_tool, PopupMenu *p_menu);
+	void _rome_tool_menu_selected(int p_index, const String &p_tool);
+	void _rome_selection_changed();
+	bool _rome_shortcut_input(const Ref<InputEvent> &p_event);
+	void _rome_prefer_world_view();
+	void _rome_play_menu(int p_id);
 	OptionButton *renderer = nullptr;
 
 #ifdef ANDROID_ENABLED

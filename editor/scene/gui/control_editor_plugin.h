@@ -264,6 +264,7 @@ class ControlOffsetTransformPreview : public Control {
 
 	EditorPlugin *plugin = nullptr;
 	Control *selected_control = nullptr;
+	ObjectID selected_control_id;
 
 	friend class ControlEditorPlugin;
 

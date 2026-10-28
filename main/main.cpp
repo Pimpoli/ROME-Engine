@@ -131,6 +131,7 @@
 #include "editor/register_editor_types.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/translations/editor_translation.h"
+#include "main/rome_update_helper.h"
 
 #if defined(TOOLS_ENABLED) && !defined(NO_EDITOR_SPLASH)
 #include "main/splash_editor.gen.h"
@@ -4026,6 +4027,17 @@ int Main::start() {
 	OS::get_singleton()->benchmark_begin_measure("Startup", "Main::Start");
 
 	ERR_FAIL_COND_V(!_start_success, EXIT_FAILURE);
+
+#ifdef TOOLS_ENABLED
+	int update_helper_exit_code = EXIT_SUCCESS;
+	if (rome_run_update_helper_if_requested(update_helper_exit_code)) {
+		OS::get_singleton()->set_exit_code(update_helper_exit_code);
+		OS::get_singleton()->benchmark_end_measure("Startup", "Main::Start");
+		// Platform run() immediately returns without a MainLoop. Returning success
+		// here prevents it from overwriting the helper's more specific exit code.
+		return EXIT_SUCCESS;
+	}
+#endif
 
 	bool has_icon = false;
 	String positional_arg;

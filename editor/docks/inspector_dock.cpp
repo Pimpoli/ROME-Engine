@@ -901,6 +901,8 @@ InspectorDock::InspectorDock(EditorData &p_editor_data) {
 	inspector = EditorInspector::create_default_inspector(search);
 	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
 		inspector->set_show_categories(false, false);
+		// Attributes replace Godot's metadata editor in the Studio properties panel.
+		inspector->set_hide_metadata(true);
 	}
 	mc->add_child(inspector);
 	inspector->connect("resource_selected", callable_mp(this, &InspectorDock::_resource_selected));

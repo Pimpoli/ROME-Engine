@@ -593,6 +593,12 @@ EditorSceneTabs::EditorSceneTabs() {
 		rome_document_tabs->connect("tab_close_pressed", callable_mp(this, &EditorSceneTabs::_rome_document_closed));
 		rome_document_tabs->connect(SceneStringName(gui_input), callable_mp(this, &EditorSceneTabs::_rome_document_input));
 		rome_document_tabs->connect(SceneStringName(resized), callable_mp(this, &EditorSceneTabs::_scene_tabs_resized), CONNECT_DEFERRED);
+		rome_document_menu = memnew(PopupMenu);
+		rome_document_menu->add_item("Cerrar", 0);
+		rome_document_menu->add_item(String::utf8("Cerrar los demás scripts"), 1);
+		rome_document_menu->add_item("Cerrar todos los scripts", 2);
+		rome_document_menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorSceneTabs::_rome_document_menu_pressed));
+		add_child(rome_document_menu);
 		set_process(true);
 	}
 }

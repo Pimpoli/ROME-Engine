@@ -94,9 +94,39 @@ PackedStringArray SceneTreeEditor::_get_node_accessibility_configuration_warning
 	return warnings;
 }
 
+void SceneTreeEditor::_rome_set_hover(Node *p_node) {
+	Node *previous = ObjectDB::get_instance<Node>(rome_hover_node);
+	if (previous == p_node) {
+		return;
+	}
+	if (previous) {
+		HashMap<Node *, CachedNode>::Iterator I = node_cache.get(previous, false);
+		if (I && I->value.item) {
+			const int index = I->value.item->get_button_by_id(0, BUTTON_ROME_INSERT);
+			if (index >= 0) {
+				I->value.item->erase_button(0, index);
+			}
+		}
+	}
+	rome_hover_node = p_node ? p_node->get_instance_id() : ObjectID();
+	if (p_node) {
+		HashMap<Node *, CachedNode>::Iterator I = node_cache.get(p_node, false);
+		if (I && I->value.item && I->value.item->get_button_by_id(0, BUTTON_ROME_INSERT) < 0) {
+			I->value.item->add_button(0, get_editor_theme_icon(SNAME("Add")), BUTTON_ROME_INSERT, false, "Insertar objeto");
+		}
+	}
+}
+
 void SceneTreeEditor::_gui_input(const Ref<InputEvent> &p_event) {
 	if (connect_to_script_mode) {
 		return; // Don't do anything in this mode.
+	}
+
+	Ref<InputEventMouseMotion> rome_motion = p_event;
+	if (rome_motion.is_valid() && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		// Studio offers the insert button on the hovered row only.
+		TreeItem *hovered = tree->get_item_at_position(tree->get_transform().xform_inv(rome_motion->get_position()));
+		_rome_set_hover(hovered ? _get_node(hovered->get_metadata(0)) : nullptr);
 	}
 
 	Ref<InputEventMouseButton> mb = p_event;
@@ -204,6 +234,10 @@ void SceneTreeEditor::_cell_button_pressed(Object *p_item, int p_column, int p_i
 		} else {
 			emit_signal(SNAME("open"), n->get_scene_file_path());
 		}
+	} else if (p_id == BUTTON_ROME_INSERT) {
+		editor_selection->clear();
+		editor_selection->add_node(n);
+		EditorNode::get_singleton()->emit_signal("rome_editor_action", "insert", Variant());
 	} else if (p_id == BUTTON_SCRIPT) {
 		Ref<Script> script_typed = n->get_script();
 		if (script_typed.is_valid()) {
@@ -2347,6 +2381,7 @@ SceneTreeEditor::SceneTreeEditor(bool p_label, bool p_can_rename, bool p_can_ope
 	tree->connect("button_clicked", callable_mp(this, &SceneTreeEditor::_cell_button_pressed));
 	tree->connect("nothing_selected", callable_mp(this, &SceneTreeEditor::_deselect_items));
 	tree->connect(SceneStringName(gui_input), callable_mp(this, &SceneTreeEditor::_gui_input));
+	tree->connect(SceneStringName(mouse_exited), callable_mp(this, &SceneTreeEditor::_rome_set_hover).bind((Node *)nullptr));
 
 	error = memnew(AcceptDialog);
 	add_child(error);
