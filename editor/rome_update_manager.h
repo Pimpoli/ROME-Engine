@@ -74,6 +74,7 @@ class ROMEUpdateManager : public Node {
 	void _poll_download(uint64_t p_now);
 	void _discard_ticket();
 	void _report_previous_installs();
+	void _report_experience_update();
 	void _cleanup_cache();
 	void _open_release_page();
 	void _finish_check();

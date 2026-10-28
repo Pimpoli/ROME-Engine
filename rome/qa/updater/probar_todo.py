@@ -13,7 +13,7 @@ import sys
 
 import comun
 
-PARTES = ["probar_scripts.py", "probar_paquete.py", "probar_ayudante.py", "probar_editor.py"]
+PARTES = ["probar_scripts.py", "probar_paquete.py", "probar_ayudante.py", "probar_editor.py", "probar_experiencias.py"]
 
 
 def main():

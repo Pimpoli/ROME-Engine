@@ -128,6 +128,7 @@
 #include "editor/file_system/editor_paths.h"
 #include "editor/gui/progress_dialog.h"
 #include "editor/project_manager/project_manager.h"
+#include "editor/project_manager/rome_project_template.h"
 #include "editor/register_editor_types.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/translations/editor_translation.h"
@@ -2249,6 +2250,12 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 
 	register_early_core_singletons();
 	initialize_modules(MODULE_INITIALIZATION_LEVEL_CORE);
+#ifdef TOOLS_ENABLED
+	if (editor && found_project && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		// An experience's GodotLuau library can only be replaced before it is loaded.
+		RomeProjectTemplate::update_project(ProjectSettings::get_singleton()->get_resource_path());
+	}
+#endif
 	register_core_extensions(); // core extensions must be registered after globals setup and before display
 
 	if (!editor) {

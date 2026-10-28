@@ -11,6 +11,7 @@
 #include "core/version.h"
 #include "editor/editor_node.h"
 #include "editor/gui/editor_toaster.h"
+#include "editor/project_manager/rome_project_template.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/box_container.h"
@@ -884,6 +885,24 @@ void ROMEUpdateManager::cancel_installation() {
 	_refresh_dialog();
 }
 
+// The experience was updated before the editor existed; repeat it where the
+// creator looks.
+void ROMEUpdateManager::_report_experience_update() {
+	bool failed = false;
+	const String message = RomeProjectTemplate::take_update_message(&failed);
+	if (message.is_empty()) {
+		return;
+	}
+	if (failed) {
+		WARN_PRINT(message);
+	} else {
+		print_line(message);
+	}
+	if (EditorToaster::get_singleton() && DisplayServer::get_singleton()->get_name() != "headless") {
+		EditorToaster::get_singleton()->popup_str(message, failed ? EditorToaster::SEVERITY_WARNING : EditorToaster::SEVERITY_INFO);
+	}
+}
+
 // Tells the user how the last installation ended. It runs in the new version
 // after a restart, or in the old one when the helper had to reopen it.
 void ROMEUpdateManager::_report_previous_installs() {
@@ -1070,6 +1089,7 @@ void ROMEUpdateManager::_notification(int p_what) {
 	if (p_what == NOTIFICATION_READY) {
 		cleanup_msec = OS::get_singleton()->get_ticks_msec() + 30000;
 		callable_mp(this, &ROMEUpdateManager::_report_previous_installs).call_deferred();
+		callable_mp(this, &ROMEUpdateManager::_report_experience_update).call_deferred();
 		callable_mp(this, &ROMEUpdateManager::_startup_check).call_deferred();
 	} else if (p_what == NOTIFICATION_PROCESS) {
 		const uint64_t now = OS::get_singleton()->get_ticks_msec();

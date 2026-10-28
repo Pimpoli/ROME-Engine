@@ -254,13 +254,43 @@ non-draft prerelease whose asset is `ROME-Studio-<version>-windows-x86_64.exe`
 with the notes in the body. The GitHub API currently lists no public release,
 and 0.1.0-alpha.1 has no updater, so its users download the next one manually.
 
-Still missing for a complete update story: experiences keep their own copy of
-`addons/ROMEStudio` and the GodotLuau binaries. Planned: store the runtime
-identity in `.rome/runtime.json` at creation, and when an experience opens with
-another identity copy only the managed folders from the runtime cache (with a
-backup in `.rome/backup-<id>/`, never touching Scenes, Scripts, Assets or user
-Luau folders), before the editor loads the experience's GDExtension (hub before
-launch, and `Main::setup2` before `load_extensions()` for `--editor --path`).
+Experiences update themselves (`RomeProjectTemplate::update_project`, called in
+`Main::setup` right before `register_core_extensions()`, the last moment the
+experience's GodotLuau DLL can still be replaced; editor + `rome/studio/enabled`
+only):
+- Identity = first 12 hex of the SHA-256 of the runtime `manifest.json` (the
+  standalone adds a `standalone` block, so it differs from the dev sidecar even
+  with equal files; equal files are never copied). `install()` and every update
+  write `.rome/runtime.json` (identity, version, managed files with hashes) plus
+  `.rome/.gdignore` and a `.gitignore` that keeps only `runtime.json`.
+- Managed = manifest files under `GodotLuau/` (minus `LocalScripts`,
+  `ModuleScripts`, `ServerScripts`, and `icons/MenuLogo.svg` plus
+  `icons/GodotLuau.ico`: the game's logo, and the window icon GodotLuau
+  regenerates from it), `addons/ROMEStudio/` and `addons/GodotLuauUpdater/`.
+  Scenes, assets and anything unlisted (`GodotLuau/.luau_trash`, `.luau_ids.cfg`,
+  the editor's `~godot_luau…dll` copy) are never touched.
+- Same identity and every managed file present: nothing is hashed. Otherwise a
+  three-way decision per file against the stamp: missing or unmodified files are
+  replaced. `DefaultScripts` and `DedicatedServer` keep a version the creator
+  changed; without a stamp any different one counts as changed. Other files edited
+  in the experience are replaced, since ROME owns them. Files ROME no longer ships
+  are retired only if unmodified.
+- Any target that cannot be opened for writing aborts before changing anything.
+  Replaced and retired files go to `.rome/backup-<previous identity|anterior>`;
+  only the newest backup is kept. A failure midway (or a copied file whose hash
+  does not match, which also drops `runtime.complete` so the runtime is
+  re-extracted) restores what had changed and leaves the old stamp, so the next
+  open retries. The message is printed at startup and repeated by
+  `ROMEUpdateManager` as a toast and in Output.
+- `get_root()` now reads the appended runtime with minizip directly (the ZIP
+  module is not registered that early), extracts sequentially, reports why an
+  extraction failed and does not retry it in the same process.
+- `package_runtime.py` mirrors `addons/ROMEStudio` (removes it before copying)
+  so removed files also leave experiences.
+- Tests: `python rome/qa/updater/probar_experiencias.py` (legacy experience
+  opened by a never-run standalone, second open, stamped update with
+  creator-edited scripts, locked file, failure midway with rollback, non-ROME
+  project).
 
 Next candidates: Studio camera mouse mapping (middle pan), a Luau command bar
 (needs a GodotLuau API to run code in the editor), BindableFunction support in

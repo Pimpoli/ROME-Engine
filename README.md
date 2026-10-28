@@ -47,6 +47,14 @@ GodotLuau viaja dentro de ROME y se actualiza con él; su actualizador propio
 queda desactivado en las experiencias de ROME para no instalar una compilación
 que no sea la adaptada.
 
+Las experiencias también se ponen al día solas: al abrir una con otra versión
+de ROME, el editor sustituye su copia de ROMEStudio y GodotLuau por la de su
+versión antes de cargarla. Nunca toca escenas, assets, tus carpetas de scripts
+ni el logo del juego. Respeta los scripts por defecto que hayas editado
+(`GodotLuau/DefaultScripts`) y deja lo sustituido en `.rome/backup-…` dentro
+de la experiencia. Si un archivo está en uso, la experiencia queda tal cual y
+se reintenta al abrirla la próxima vez.
+
 ## Base del motor
 
 ROME conserva el núcleo de Godot y sus escenas reutilizables, mientras desarrolla
@@ -194,9 +202,10 @@ python rome/package_runtime.py --rome-only
 ```
 
 Este modo actualiza el editor, ROMEStudio y sus recursos. No reescribe el código,
-los componentes del addon ni los binarios de GodotLuau. Tampoco regenera las
-escenas de experiencias existentes; crea una nueva desde la plantilla para
-obtener su última versión.
+los componentes del addon ni los binarios de GodotLuau. Las experiencias
+existentes reciben el ROMEStudio nuevo la próxima vez que se abren, pero sus
+escenas no se regeneran; crea una nueva desde la plantilla para obtener su
+última versión.
 
 ## Empezar a crear
 

@@ -42,6 +42,8 @@ def refresh_rome(output: Path):
         raise SystemExit("An existing runtime bundle is required for --rome-only.")
     keep_luau_with_rome(project)
     addon = project / "addons/ROMEStudio"
+    # Mirrored, so a file removed from ROME also leaves the experiences it updates.
+    shutil.rmtree(addon, ignore_errors=True)
     shutil.copytree(ROOT / "rome/addons/ROMEStudio", addon, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns("*.import", "*.uid", "__pycache__"))
     (addon / "assets").mkdir(exist_ok=True)
@@ -110,6 +112,7 @@ def package(source: Path, output: Path, binary_source: Path | None = None):
     text = text.replace('_mp_count.custom_minimum_size = Vector2(90, 0)', '_mp_count.custom_minimum_size = Vector2(54, 0)')
     editor_plugin.write_text(text, encoding="utf-8", newline="\n")
     keep_luau_with_rome(project)
+    shutil.rmtree(project / "addons/ROMEStudio", ignore_errors=True)
     shutil.copytree(ROOT / "rome/addons/ROMEStudio", project / "addons/ROMEStudio", dirs_exist_ok=True, ignore=ignore)
 
     for asset in (ROOT / "rome/assets/templates").iterdir():

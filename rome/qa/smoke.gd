@@ -205,6 +205,11 @@ func _run() -> void:
 	if not _check(updates.errors.is_empty(), "Update release, version and integrity rules: " + str(updates.errors)):
 		return
 	checks.append_array(updates.checks)
+	var stamp = JSON.parse_string(FileAccess.get_file_as_string("res://.rome/runtime.json"))
+	var manifest := OS.get_executable_path().get_base_dir().path_join("rome_runtime/manifest.json")
+	var identity: String = FileAccess.get_file_as_string(manifest).sha256_text().left(12) if FileAccess.file_exists(manifest) else ""
+	if not _check(stamp is Dictionary and str(stamp.get("identity", "")).length() == 12 and (identity.is_empty() or stamp.identity == identity), "Opening the experience records its runtime in .rome/runtime.json"):
+		return
 	var panels: Dictionary = await preload("res://addons/ROMESmoke/studio_panels_checks.gd").run(root)
 	if not _check(panels.has("errors") and panels.errors.is_empty(), "Studio panels, insertion and properties: " + str(panels.get("errors", "la prueba se detuvo"))):
 		return
