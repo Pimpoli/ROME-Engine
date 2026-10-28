@@ -22,6 +22,8 @@
 #include "scene/gui/panel_container.h"
 #include "scene/gui/texture_rect.h"
 #include "scene/resources/image_texture.h"
+#include "scene/resources/gradient.h"
+#include "scene/resources/gradient_texture.h"
 #include "scene/resources/style_box_flat.h"
 #include "scene/resources/style_box.h"
 #include "servers/display/display_server.h"
@@ -323,10 +325,28 @@ void ProjectManager::_rome_build_hub() {
 	TextureRect *banner_image = memnew(TextureRect);
 	banner_image->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
 	banner_image->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_COVERED);
-	banner_image->set_texture(rome_hub_image(RomeProjectTemplate::get_root().path_join("hub/hero.png")));
+	String hero_path = RomeProjectTemplate::get_root().path_join("hub/hero-art.png");
+	if (!FileAccess::exists(hero_path)) {
+		hero_path = RomeProjectTemplate::get_root().path_join("hub/hero.png");
+	}
+	banner_image->set_texture(rome_hub_image(hero_path));
 	banner->add_child(banner_image);
-	ColorRect *shade = memnew(ColorRect);
-	shade->set_color(Color(0.025, 0.035, 0.055, 0.52));
+	Ref<Gradient> gradient;
+	gradient.instantiate();
+	gradient->set_color(0, Color(0.025, 0.035, 0.055, 0.82));
+	gradient->set_color(1, Color(0.025, 0.035, 0.055, 0.04));
+	gradient->set_offset(1, 0.75);
+	Ref<GradientTexture2D> scrim;
+	scrim.instantiate();
+	scrim->set_gradient(gradient);
+	scrim->set_width(512);
+	scrim->set_height(1);
+	scrim->set_fill_from(Vector2(0, 0));
+	scrim->set_fill_to(Vector2(1, 0));
+	TextureRect *shade = memnew(TextureRect);
+	shade->set_texture(scrim);
+	shade->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+	shade->set_stretch_mode(TextureRect::STRETCH_SCALE);
 	shade->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	banner->add_child(shade);
 	MarginContainer *banner_margin = memnew(MarginContainer);
