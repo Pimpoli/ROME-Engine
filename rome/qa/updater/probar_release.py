@@ -12,7 +12,10 @@ tamaño y su SHA-256 coinciden con los que publica GitHub. Con --descarga-propia
 lo descarga el propio actualizador. Ojo: hacia GitHub se han visto 160 KB/s
 sostenidos y cortes a los ~15 min, así que puede no terminar.
 
-    python rome/qa/updater/probar_release.py [--anterior 0.1.0-alpha.1] [--descarga-propia]
+Con --desde <exe> parte de un ejecutable real ya publicado (la versión anterior
+tal cual la tienen los usuarios) en vez de una copia del build que finge serlo.
+
+    python rome/qa/updater/probar_release.py [--anterior 0.1.0-alpha.1 | --desde <exe>] [--descarga-propia]
 """
 import argparse
 import http.client
@@ -99,9 +102,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--anterior", help="Versión que finge la copia (misma longitud que la publicada)")
     parser.add_argument("--descarga-propia", action="store_true", help="Que el actualizador baje el ejecutable él mismo")
+    parser.add_argument("--desde", type=Path, help="Ejecutable real de una versión anterior (p. ej. la release ya publicada) en vez de una copia parcheada")
     args = parser.parse_args()
     version = comun.version_rome()
-    anterior = args.anterior or anterior_de(version)
+    anterior = comun.version_de(args.desde) if args.desde else args.anterior or anterior_de(version)
     informe = comun.Informe("release")
 
     asset = asset_publicado(version)
@@ -111,11 +115,16 @@ def main():
 
     comun.matar_ejecutable(INSTALADO)
     comun.carpeta_limpia(INSTALADO.parent)
-    copia = TRABAJO / "editor-anterior.exe"
-    comun.parchear(COMPILADO, copia, [(version, anterior)])
-    salida = comun.empaquetar(copia, INSTALADO)
-    INSTALADO.with_name(INSTALADO.name + ".sha256").unlink(missing_ok=True)
-    if not informe.check(salida.returncode == 0 and comun.version_de(INSTALADO) == anterior, f"Se arma una copia que dice ser la {anterior}", salida.stderr.strip()[-300:]):
+    if args.desde:
+        shutil.copy2(args.desde, INSTALADO)
+        error = ""
+    else:
+        copia = TRABAJO / "editor-anterior.exe"
+        comun.parchear(COMPILADO, copia, [(version, anterior)])
+        salida = comun.empaquetar(copia, INSTALADO)
+        INSTALADO.with_name(INSTALADO.name + ".sha256").unlink(missing_ok=True)
+        error = salida.stderr.strip()[-300:] if salida.returncode else ""
+    if not informe.check(not error and comun.version_de(INSTALADO) == anterior, f"Se instala {'la ' + args.desde.name if args.desde else 'una copia que dice ser la ' + anterior}", error):
         return informe.guardar()
     preparar_proyecto()
     espera = 1500 if args.descarga_propia else 120
