@@ -51,7 +51,10 @@ class ROMEUpdateManager : public Node {
 	uint64_t next_poll_msec = 0;
 	uint64_t cleanup_msec = 0;
 	uint64_t progress_msec = 0;
+	uint64_t retry_msec = 0;
 	int64_t progress_bytes = -1;
+	int64_t download_offset = 0;
+	int download_attempts = 0;
 	bool checking = false;
 	bool rome_done = false;
 	bool godot_done = false;
@@ -67,6 +70,9 @@ class ROMEUpdateManager : public Node {
 	void _apply_response(const String &p_body, bool p_godot);
 	void _download_completed(int p_result, int p_code, const PackedStringArray &p_headers, const PackedByteArray &p_body);
 	void _download_update();
+	void _request_download();
+	void _retry_download(const String &p_reason);
+	void _finish_download();
 	void _install_update();
 	bool _launch_helper(bool p_restart);
 	void _install_on_exit();

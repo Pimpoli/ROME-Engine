@@ -40,8 +40,10 @@ versiones publicadas en Releases, descarga en segundo plano el ejecutable de tu
 plataforma y comprueba su SHA-256. La versión nueva se instala al cerrar el
 editor, o al momento con **Ayuda > Actualizaciones de ROME > Actualizar y
 reiniciar**, que reabre la misma experiencia. Si algo falla, ROME vuelve a abrir
-la versión anterior. La 0.1.0-alpha.1 no traía actualizador: quien la tenga
-descarga esta versión a mano una sola vez.
+la versión anterior. Desde la versión siguiente a la 0.1.0-alpha.2, si la
+conexión se corta o va muy lenta, la descarga se reanuda sola desde donde quedó,
+también la próxima vez que abras ROME. La 0.1.0-alpha.1 no traía actualizador:
+quien la tenga descarga esta versión a mano una sola vez.
 
 GodotLuau viaja dentro de ROME y se actualiza con él; su actualizador propio
 queda desactivado en las experiencias de ROME para no instalar una compilación

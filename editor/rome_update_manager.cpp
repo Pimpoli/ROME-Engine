@@ -40,6 +40,8 @@ constexpr int MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024;
 // queries per hour and address, and the hub and the editor each check on start.
 constexpr double CHECK_INTERVAL_SECONDS = 600.0;
 constexpr uint64_t DOWNLOAD_STALL_MSEC = 60000;
+// Consecutive attempts that bring no data before the download waits for the user.
+constexpr int DOWNLOAD_RETRIES = 8;
 constexpr uint64_t HELPER_READY_MSEC = 90000;
 constexpr int MAX_NOTES_LENGTH = 6000;
 
@@ -429,7 +431,7 @@ void ROMEUpdateManager::check_updates(bool p_force) {
 		_refresh_dialog();
 		return;
 	}
-	if (checking || downloading || helper_started || helper_preparing || (!p_force && !_preference(STARTUP_SETTING, true))) {
+	if (checking || downloading || retry_msec != 0 || helper_started || helper_preparing || (!p_force && !_preference(STARTUP_SETTING, true))) {
 		return;
 	}
 	automatic_check = !p_force;
@@ -595,7 +597,7 @@ void ROMEUpdateManager::_finish_check() {
 				dialog->popup_centered(Size2i(640, 600) * EDSCALE);
 			}
 		}
-		if (_preference(DOWNLOAD_SETTING, true) && !verified && !downloading && version != failed_version()) {
+		if (_preference(DOWNLOAD_SETTING, true) && !verified && !downloading && retry_msec == 0 && version != failed_version()) {
 			_download_update();
 		}
 	}
@@ -611,7 +613,7 @@ void ROMEUpdateManager::_set_action_error(const String &p_message) {
 }
 
 void ROMEUpdateManager::_download_update() {
-	if (downloading || helper_started || helper_preparing || update.is_empty()) {
+	if (downloading || retry_msec != 0 || helper_started || helper_preparing || update.is_empty()) {
 		return;
 	}
 	const Dictionary asset = update.get("asset", Dictionary());
@@ -633,16 +635,66 @@ void ROMEUpdateManager::_download_update() {
 		return;
 	}
 	verified = false;
-	downloading = true;
+	download_attempts = 0;
 	original_hash = String();
+	_request_download();
+}
+
+// GitHub may serve a release slowly and cut the transfer after about fifteen
+// minutes, so a package can take several requests and several sessions: what
+// arrived stays in .partial and each request asks only for the rest.
+void ROMEUpdateManager::_request_download() {
+	const Dictionary asset = update.get("asset", Dictionary());
+	const int64_t total = asset.get("size", 0);
+	const String record = partial_path + ".json";
+	int64_t offset = FileAccess::exists(partial_path) ? int64_t(FileAccess::get_size(partial_path)) : 0;
+	if (offset > 0 && (String(read_json_file(record).get("sha256", "")) != String(asset["sha256"]) || offset > total)) {
+		// Left by another package.
+		DirAccess::remove_absolute(partial_path);
+		offset = 0;
+	}
+	if (offset == total) {
+		_finish_download();
+		return;
+	}
+	Dictionary owner;
+	owner["sha256"] = asset["sha256"];
+	owner["size"] = total;
+	write_json_file(record, owner);
+	Vector<String> headers = { "User-Agent: ROME-Engine/" ROME_VERSION };
+	if (offset > 0) {
+		headers.push_back("Range: bytes=" + itos(offset) + "-");
+	}
+	download_offset = offset;
+	downloading = true;
+	retry_msec = 0;
 	progress_bytes = -1;
 	progress_msec = OS::get_singleton()->get_ticks_msec();
 	download_request->set_download_file(partial_path);
-	const Error error = download_request->request(asset["url"], { "User-Agent: ROME-Engine/" ROME_VERSION });
-	if (error != OK) {
+	// Appends only to a 206 answer; a server that sends the whole file rewrites it.
+	download_request->set_append_to_download_file(offset > 0);
+	if (download_request->request(asset["url"], headers) != OK) {
 		downloading = false;
 		_set_action_error(String::utf8("No se pudo iniciar la descarga. Puedes reintentar."));
 	}
+	_refresh_dialog();
+}
+
+void ROMEUpdateManager::_retry_download(const String &p_reason) {
+	const int64_t size = FileAccess::exists(partial_path) ? int64_t(FileAccess::get_size(partial_path)) : 0;
+	// Only attempts that bring nothing count towards giving up.
+	if (size > download_offset) {
+		download_attempts = 0;
+	}
+	download_attempts++;
+	if (download_attempts > DOWNLOAD_RETRIES) {
+		_set_action_error(p_reason + String::utf8(" Lo descargado se conserva y la descarga seguirá desde ahí; puedes reintentar."));
+		return;
+	}
+	const uint64_t delay = MIN(uint64_t(60000), uint64_t(5000) << MIN(download_attempts - 1, 4));
+	retry_msec = OS::get_singleton()->get_ticks_msec() + delay;
+	status["action_error"] = "";
+	status["download_message"] = p_reason + vformat(String::utf8(" Se reanuda en %d s; lo descargado se conserva."), int(delay / 1000));
 	_refresh_dialog();
 }
 
@@ -652,15 +704,31 @@ void ROMEUpdateManager::_download_completed(int p_result, int p_code, const Pack
 	}
 	downloading = false;
 	const Dictionary asset = update.get("asset", Dictionary());
-	if (p_result != HTTPRequest::RESULT_SUCCESS || p_code != HTTPClient::RESPONSE_OK || asset.is_empty()) {
-		_set_action_error(String::utf8("La descarga no se completó. Tu instalación actual sigue disponible; puedes reintentar."));
+	if (asset.is_empty()) {
 		return;
 	}
-	Ref<FileAccess> file = FileAccess::open(partial_path, FileAccess::READ);
-	const bool correct_size = file.is_valid() && file->get_length() == uint64_t(int64_t(asset["size"]));
-	file.unref();
+	if (p_result == HTTPRequest::RESULT_SUCCESS && p_code >= 400 && p_code < 500 && p_code != 408 && p_code != 416 && p_code != 429) {
+		_set_action_error(vformat(String::utf8("El paquete no está disponible en el servidor de descargas (HTTP %d). Tu instalación actual sigue igual."), p_code));
+		return;
+	}
+	if (p_code == HTTPClient::RESPONSE_REQUESTED_RANGE_NOT_SATISFIABLE) {
+		DirAccess::remove_absolute(partial_path);
+	}
+	const bool answered = p_result == HTTPRequest::RESULT_SUCCESS && (p_code == HTTPClient::RESPONSE_OK || p_code == HTTPClient::RESPONSE_PARTIAL_CONTENT);
+	const int64_t size = FileAccess::exists(partial_path) ? int64_t(FileAccess::get_size(partial_path)) : 0;
+	if (!answered || size < int64_t(asset["size"])) {
+		_retry_download(String::utf8("La conexión con el servidor de descargas se cortó."));
+		return;
+	}
+	_finish_download();
+}
+
+void ROMEUpdateManager::_finish_download() {
+	const Dictionary asset = update.get("asset", Dictionary());
+	const bool correct_size = FileAccess::exists(partial_path) && FileAccess::get_size(partial_path) == uint64_t(int64_t(asset["size"]));
 	if (!correct_size || FileAccess::get_sha256(partial_path).to_lower() != String(asset["sha256"])) {
 		DirAccess::remove_absolute(partial_path);
+		DirAccess::remove_absolute(partial_path + ".json");
 		_set_action_error(String::utf8("El archivo descargado no coincide con el SHA-256 publicado. Se descartó; vuelve a descargarlo."));
 		return;
 	}
@@ -672,7 +740,9 @@ void ROMEUpdateManager::_download_completed(int p_result, int p_code, const Pack
 		_set_action_error(String::utf8("No se pudo preparar el archivo descargado para actualizar."));
 		return;
 	}
+	DirAccess::remove_absolute(partial_path + ".json");
 	verified = true;
+	status["action_error"] = "";
 	_refresh_dialog();
 	if (EditorToaster::get_singleton() && _preference(INSTALL_ON_EXIT_SETTING, true)) {
 		EditorToaster::get_singleton()->popup_str("ROME " + String(update["version"]) + String::utf8(" ya está descargada y verificada. Se instalará al cerrar el editor."));
@@ -683,28 +753,30 @@ void ROMEUpdateManager::_download_completed(int p_result, int p_code, const Pack
 void ROMEUpdateManager::_poll_download(uint64_t p_now) {
 	const Dictionary asset = update.get("asset", Dictionary());
 	const int64_t total = asset.get("size", 0);
-	const int64_t bytes = download_request->get_downloaded_bytes();
+	const int64_t bytes = download_offset + download_request->get_downloaded_bytes();
 	progress->set_value(total > 0 ? double(bytes) / double(total) * 100.0 : 0.0);
-	// The request has no total time limit; only a connection without data fails.
+	// The request has no total time limit; only a connection without data is retried.
 	if (bytes != progress_bytes) {
 		progress_bytes = bytes;
 		progress_msec = p_now;
 	} else if (p_now - progress_msec > DOWNLOAD_STALL_MSEC) {
 		download_request->cancel_request();
 		downloading = false;
-		verified = false;
-		_set_action_error(String::utf8("La descarga se detuvo: no llegaron datos durante un minuto. Revisa la conexión y vuelve a intentarlo."));
+		_retry_download(String::utf8("No llegaron datos durante un minuto."));
 	}
 }
 
 void ROMEUpdateManager::cancel_download() {
-	if (!downloading) {
+	if (!downloading && retry_msec == 0) {
 		return;
 	}
-	download_request->cancel_request();
+	if (downloading) {
+		download_request->cancel_request();
+	}
 	downloading = false;
+	retry_msec = 0;
 	verified = false;
-	status["action_error"] = String::utf8("Descarga cancelada. Puedes volver a iniciarla.");
+	status["action_error"] = String::utf8("Descarga en pausa. Lo descargado se conserva y, al reanudarla, sigue desde ahí.");
 	_refresh_dialog();
 }
 
@@ -1025,6 +1097,9 @@ Dictionary ROMEUpdateManager::get_status() const {
 	Dictionary result = status.duplicate(true);
 	result["checking"] = checking;
 	result["downloading"] = downloading;
+	result["retry_pending"] = retry_msec != 0;
+	result["download_offset"] = download_offset;
+	result["download_attempts"] = download_attempts;
 	result["verified"] = verified;
 	result["helper_preparing"] = helper_preparing;
 	result["helper_started"] = helper_started;
@@ -1047,8 +1122,10 @@ void ROMEUpdateManager::_refresh_dialog() {
 		action = String::utf8("Preparando la instalación... El editor se cerrará en cuanto esté lista.");
 	} else if (helper_started) {
 		action = String::utf8("La actualización espera a que se cierre el editor. Guarda tu trabajo en los avisos de cierre.");
+	} else if (retry_msec != 0) {
+		action = status.get("download_message", "");
 	} else if (downloading) {
-		action = String::utf8("Descargando el paquete de ROME en segundo plano...");
+		action = String::utf8("Descargando el paquete de ROME en segundo plano...") + (download_offset > 0 ? String::utf8(" Sigue desde lo que ya se había descargado.") : String());
 	} else if (verified) {
 		action = on_exit ? String::utf8("Descarga verificada mediante SHA-256. Se instalará al cerrar el editor; «Actualizar y reiniciar» la instala ahora.") : String::utf8("Descarga verificada mediante SHA-256. Actualizar y reiniciar cerrará el editor con los avisos de guardado habituales.");
 	} else {
@@ -1062,14 +1139,15 @@ void ROMEUpdateManager::_refresh_dialog() {
 	}
 	release_button->set_visible(!String(update.get("release_url", "")).is_empty());
 	const bool available = !update.is_empty() && !Dictionary(update.get("asset", Dictionary())).is_empty() && compare_versions(update["version"], ROME_VERSION) > 0;
-	const bool busy = checking || downloading || helper_started || helper_preparing;
+	const bool transferring = downloading || retry_msec != 0;
+	const bool busy = checking || transferring || helper_started || helper_preparing;
 	check_button->set_disabled(busy);
 	download_button->set_visible(available && !verified);
 	download_button->set_disabled(busy);
 	install_button->set_visible(verified);
 	install_button->set_disabled(helper_started || helper_preparing || !quit_callback.is_valid());
-	cancel_button->set_visible(downloading);
-	progress->set_visible(downloading);
+	cancel_button->set_visible(transferring);
+	progress->set_visible(transferring);
 	install_on_exit_toggle->set_visible(EditorNode::get_singleton() != nullptr);
 	prerelease_toggle->set_pressed_no_signal(_include_prereleases());
 }
@@ -1095,6 +1173,9 @@ void ROMEUpdateManager::_notification(int p_what) {
 		const uint64_t now = OS::get_singleton()->get_ticks_msec();
 		if (downloading) {
 			_poll_download(now);
+		} else if (retry_msec != 0 && now >= retry_msec) {
+			retry_msec = 0;
+			_request_download();
 		}
 		if ((helper_preparing || helper_started) && now >= next_poll_msec) {
 			next_poll_msec = now + 250;
@@ -1143,7 +1224,8 @@ ROMEUpdateManager::ROMEUpdateManager() {
 		request->set_body_size_limit(request == download_request ? MAX_DOWNLOAD_BYTES : 16 * 1024 * 1024);
 	}
 	download_request->set_accept_gzip(false);
-	download_request->set_keep_partial_download(false);
+	// What arrived is kept so a cut transfer continues (see _request_download).
+	download_request->set_keep_partial_download(true);
 	rome_request->connect("request_completed", callable_mp(this, &ROMEUpdateManager::_request_completed).bind(false));
 	godot_request->connect("request_completed", callable_mp(this, &ROMEUpdateManager::_request_completed).bind(true));
 	download_request->connect("request_completed", callable_mp(this, &ROMEUpdateManager::_download_completed));

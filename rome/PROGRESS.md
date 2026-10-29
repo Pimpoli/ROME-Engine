@@ -269,13 +269,20 @@ face6fb5f4f70229e7b9b5667c5bb4f76448d1dba8a8989c8defb41aec4740e4) plus its
 `probar_release.py` passed 13/13 against it: real API, size and digest check,
 clean close, install on close, reopened as alpha.2 and "current".
 
-Found by that check, still open:
+Found by that check:
 - From this machine GitHub served the asset at ~160 KB/s sustained (16 KB/s at
   worst) while other hosts gave 29 MB/s, and cut the transfer after ~15 min
-  (curl error 56). Range requests work (206), but the updater neither resumes
-  nor retries, so on such a link an update never completes. Next: keep the
-  partial file and continue with `Range` across retries and sessions.
-- Closing the editor through the window-close path while a freshly copied
+  (curl error 56). Range requests work (206). Fixed after alpha.2 (ships in the
+  next release; alpha.2 itself downloads the next one the old way): the download
+  keeps what arrived in `<asset>.partial` (HTTPRequest `keep_partial_download`),
+  records the asset's SHA-256 in `<asset>.partial.json`, and asks only for the
+  rest with `Range` + `append_to_download_file` (a 200 answer rewrites the file).
+  Cuts and one-minute stalls retry by themselves after 5, 10, 20, 40, 60 s; only
+  attempts that bring no data count, and after 8 the user can resume by hand.
+  Closing ROME mid-download continues next time; "Cancelar" pauses and keeps
+  the data. Test: `probar_editor.py reanudar` (local server cuts at 40 MB, editor
+  killed, reopened: requests start at 40 MB and then 80 MB, verified, installed).
+- Still open: closing the editor through the window-close path while a freshly copied
   experience is still in its first import ends in STATUS_HEAP_CORRUPTION
   (0xC0000374 in ntdll; seen twice, no Godot backtrace) before install on close
   runs. Waiting for the scan avoids it, and ROMEUpdaterQA now waits. Locating

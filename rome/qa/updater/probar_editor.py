@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -40,12 +41,35 @@ class Manejador(BaseHTTPRequestHandler):
             if not archivo:
                 self.send_error(404)
                 return
-            self.send_response(200)
+            total = archivo.stat().st_size
+            rango = self.headers.get("Range", "")
+            inicio = int(rango[6:-1]) if rango.startswith("bytes=") and rango.endswith("-") else 0
+            estado["rangos"].append(inicio)
+            if inicio >= total:
+                self.send_error(416)
+                return
+            # Como GitHub con una conexión lenta: corta a mitad, sin avisar.
+            corte = estado["cortes"].pop(0) if estado["cortes"] else None
+            self.send_response(206 if inicio else 200)
+            if inicio:
+                self.send_header("Content-Range", f"bytes {inicio}-{total - 1}/{total}")
             self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(archivo.stat().st_size))
+            self.send_header("Content-Length", str(total - inicio))
             self.end_headers()
+            restante = total - inicio if corte is None else min(corte, total - inicio)
             with open(archivo, "rb") as origen:
-                shutil.copyfileobj(origen, self.wfile, 1 << 20)
+                origen.seek(inicio)
+                while restante > 0:
+                    bloque = origen.read(min(1 << 20, restante))
+                    self.wfile.write(bloque)
+                    restante -= len(bloque)
+            if corte is not None:
+                estado["cortados"].append(inicio + corte)
+                self.close_connection = True
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
         else:
             self.send_error(404)
 
@@ -211,6 +235,32 @@ def e_cancelar(datos, servidor):
     comun.matar_ejecutable(descargado)
 
 
+def e_reanudar(datos, servidor):
+    """El servidor corta la descarga como GitHub cuando va lento; el editor se cierra a medias y al volver sigue."""
+    corte = 40 * 1024 * 1024
+    releases = [release(datos["version"], datos["local"]), release(datos["superior"], datos["nuevo"])]
+    estado = servidor.estado
+    estado["cortes"], estado["rangos"], estado["cortados"] = [corte], [], []
+    proceso, base = abrir_editor("reanudar", datos, servidor, releases, {"etapa": "al_cerrar"})
+    parcial = descarga_de(base, datos).with_name(comun.nombre_asset(datos["superior"]) + ".partial")
+    comun.esperar(lambda: estado["cortados"] and parcial.is_file() and parcial.stat().st_size >= corte, 120, 0.2)
+    # Cerrado de golpe mientras espera para reintentar.
+    comun.cerrar(proceso)
+    tamano = parcial.stat().st_size if parcial.is_file() else 0
+    INFORME.check(tamano == corte, "reanudar: tras el corte se conserva lo descargado", tamano)
+    estado["cortes"], estado["rangos"] = [corte], []
+    (PROYECTO / "updater_qa_result.json").unlink(missing_ok=True)
+    otra = comun.lanzar([INSTALADO, "--editor", "--path", PROYECTO], PROYECTO, comun.entorno_aislado("e2e-reanudar", limpio=False)[0], comun.TRABAJO / "logs/editor-reanudar-2.log")
+    comun.esperar(lambda: "descarga" in resultado() or otra.poll() is not None, 300, 1)
+    descarga = resultado().get("descarga", {}).get("estado", {})
+    INFORME.check(estado["rangos"][:2] == [corte, 2 * corte], "reanudar: al volver a abrir sigue desde lo guardado, y tras otro corte, desde donde quedó", estado["rangos"])
+    INFORME.check(descarga.get("verified"), "reanudar: termina y verifica el SHA-256", descarga.get("action_error", ""))
+    comun.esperar(lambda: otra.poll() is not None, 90, 1)
+    comun.cerrar(otra)
+    INFORME.check(comun.esperar(lambda: comun.sha256_o_nada(INSTALADO) == datos["sha_nuevo"], 120, 1), "reanudar: al cerrar se instala la versión descargada")
+    INFORME.check(not parcial.exists() and not parcial.with_name(parcial.name + ".json").exists(), "reanudar: no quedan restos de la descarga a medias")
+
+
 def e_cierre_con_cambios(datos, servidor):
     # No es del actualizador, pero «Actualizar y reiniciar» y el cierre normal usan este camino.
     proceso, base = abrir_editor("cierre_con_cambios", datos, servidor, [release(datos["version"], datos["local"])])
@@ -223,14 +273,16 @@ def e_cierre_con_cambios(datos, servidor):
                   f"código de salida {codigo}; {'sin aviso' if 'sin_aviso' in r else 'el editor terminó sin avisar' if 'aviso_al_cerrar' not in r else ''}")
 
 
-ESCENARIOS = {"sin_novedad": e_sin_novedad, "con_novedad": e_con_novedad, "cancelar": e_cancelar, "al_cerrar": e_al_cerrar, "cierre_con_cambios": e_cierre_con_cambios}
+ESCENARIOS = {"sin_novedad": e_sin_novedad, "con_novedad": e_con_novedad, "cancelar": e_cancelar, "al_cerrar": e_al_cerrar, "reanudar": e_reanudar,
+              "cierre_con_cambios": e_cierre_con_cambios}
 
 
 def probar(nombres):
     datos = paquetes.preparar()
     preparar_proyecto()
     servidor = ThreadingHTTPServer(("127.0.0.1", paquetes.PUERTO), Manejador)
-    servidor.estado = {"releases": [], "peticiones": [], "archivos": {comun.nombre_asset(datos["superior"]): datos["nuevo"], comun.nombre_asset(datos["version"]): datos["local"]}}
+    servidor.estado = {"releases": [], "peticiones": [], "rangos": [], "cortes": [], "cortados": [],
+                       "archivos": {comun.nombre_asset(datos["superior"]): datos["nuevo"], comun.nombre_asset(datos["version"]): datos["local"]}}
     threading.Thread(target=servidor.serve_forever, daemon=True).start()
     try:
         for nombre in nombres or ESCENARIOS:
