@@ -220,6 +220,11 @@ private:
 
 	List<Ref<SceneTreeTimer>> timers;
 	List<Ref<Tween>> tweens;
+	// A timeout or a tween callback can run a nested main loop iteration (the editor's
+	// progress dialog does when a callback saves a scene): it must not walk these lists
+	// while the outer loop still holds their elements.
+	bool processing_timers = false;
+	bool processing_tweens = false;
 
 	///network///
 

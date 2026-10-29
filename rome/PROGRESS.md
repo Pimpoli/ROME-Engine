@@ -221,8 +221,10 @@ ROMEStudio addon (GDScript): new Insertar objeto window (`studio_insert_dialog.g
 Validation: 180 integrated editor checks (`rome/qa/smoke.gd` with
 `ribbon_checks.gd` and `studio_panels_checks.gd`) pass in a fresh project.
 Known noise: GodotLuau's LuauLanguage misses `_get_public_*` virtuals, and Godot
-4.8 beta sometimes reports "update_scripts_classes already exists"; one run
-crashed right after that error while saving a scene and later runs did not.
+4.8 beta reports "update_scripts_classes already exists" when a nested main loop
+re-enters script class registration (the progress dialog guards it). The crash
+that sometimes followed that error while saving a scene was the SceneTree timer
+double free fixed after alpha.3 (updater notes below).
 
 Updater and standalone executable (`editor/rome_update_manager.*`,
 `main/rome_update_helper.*`, packaging scripts):
@@ -262,7 +264,8 @@ build that claims the previous version (same-length patch) finds the release
 on GitHub, downloads and verifies it, installs it on close and, reopened, says
 it is current. `--desde <exe>` starts from the previous published executable
 instead of the patched copy; the editor stays open `--espera-cierre` seconds (60)
-before closing, because closing right after startup crashes (below).
+before closing, because alpha.3 and older crash when closed right after startup
+(below); from a version with the fix, `--espera-cierre 0` is the harder test.
 
 Released: v0.1.0-alpha.2 on 2026-10-28, prerelease from commit e682de2, Windows
 asset `ROME-Studio-0.1.0-alpha.2-windows-x86_64.exe` (186,879,068 bytes, SHA-256
@@ -292,17 +295,31 @@ Found by that check:
   Closing ROME mid-download continues next time; "Cancelar" pauses and keeps
   the data. Test: `probar_editor.py reanudar` (local server cuts at 40 MB, editor
   killed, reopened: requests start at 40 MB and then 80 MB, verified, installed).
-- Still open: closing the editor through the window-close path within the first
-  seconds after it opens ends in STATUS_HEAP_CORRUPTION (0xC0000374 at
-  ntdll+0x118095, no Godot backtrace) before install on close runs; the
-  executable stays as it was and the update installs at the next close. With the
-  published alpha.2 it happened 4 times out of 4 (closed about a second after the
-  editor was ready, nothing unsaved, also with the experience already imported
-  and updated); closed 60 s after start it is clean (13/13). Not the first scan
-  (`is_scanning()` was already false) nor the cache cleanup (main thread, at
-  30 s); `--quit` right after start exits cleanly. Reproduce with
-  `probar_release.py --desde <alpha.2 exe> --espera-cierre 0`; locating it needs
-  an ASan build or one with debug symbols.
+- Fixed after alpha.3 (ships in the next release; alpha.2 and alpha.3 keep it):
+  closing the editor within the first second after it opened ended in
+  STATUS_HEAP_CORRUPTION (0xC0000374 at ntdll+0x118095, no Godot backtrace)
+  before install on close ran, 4 of 4 with the published alpha.2 and clean when
+  closed 60 s after start. Cause, in Godot's `SceneTree::process_timers`: a
+  timeout callback that runs a nested main loop iteration (any EditorProgress:
+  saving a scene, `ResourceSaver.save` registering script classes, mesh
+  previews) walked the timer list again, fired and erased the timer the outer
+  loop was holding, and the outer loop erased it a second time. As the only
+  timer the list was already gone and nothing happened; with another pending
+  (ROMEStudio waits 0.8 s in `studio.gd` before framing a fresh experience's
+  camera) the element was freed twice. ROMEUpdaterQA resumes from a timer and
+  calls `save_all_scenes()`; the smoke test's occasional crash after
+  `ResourceSaver.save` was the same. Found with `rome/qa/tools/depurador.cpp`
+  (`compilar_depurador.bat` builds `bin/depurador.exe`; there is no cdb or
+  WinDbg here): it runs a program under the Win32 debug API and writes every
+  thread's stack on a crash plus OutputDebugString, and under its debug heap the
+  double erase printed `Condition "p_element->data != this"` in
+  `List<Ref<SceneTreeTimer>>::_Data::erase` instead of crashing.
+  `process_timers` and `process_tweens` (same pattern with tween callbacks) now
+  ignore nested calls while they walk their list. Checks: smoke.gd fires a
+  0.05 s timer with another pending and runs `make_mesh_previews` from its
+  callback; it must fire once (182 checks; the build without the fix crashed at
+  `ResourceSaver.save` before getting there). `probar_release.py --espera-cierre
+  0` from the fixed build: 13/13, no list errors in the logs.
 - ROMEUpdaterQA sent the close request from inside its own coroutine: with
   nothing unsaved the editor exits synchronously and `unload_editor_addons()`
   frees the plugin mid-function (`Nonexistent function '_cerrar_sin_preguntas'

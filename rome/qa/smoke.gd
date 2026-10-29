@@ -215,6 +215,18 @@ func _run() -> void:
 	if not _check(panels.has("errors") and panels.errors.is_empty(), "Studio panels, insertion and properties: " + str(panels.get("errors", "la prueba se detuvo"))):
 		return
 	checks.append_array(panels.checks)
+	# A nested main loop inside a timer callback (here the mesh previews' progress dialog) fired
+	# that timer again and freed it twice while another one was pending (0xC0000374 on close).
+	get_tree().create_timer(30.0)
+	var timer := get_tree().create_timer(0.05)
+	var fired := [0]
+	timer.timeout.connect(func() -> void: fired[0] += 1)
+	await timer.timeout
+	var meshes: Array[Mesh] = [BoxMesh.new()]
+	EditorInterface.make_mesh_previews(meshes, 32)
+	await get_tree().process_frame
+	if not _check(fired[0] == 1, "A nested main loop inside a timer callback does not fire it twice"):
+		return
 	var report := FileAccess.open("res://integration-result.json", FileAccess.WRITE)
 	report.store_string(JSON.stringify({"passed": true, "checks": checks}, "  "))
 	report.close()
