@@ -103,8 +103,15 @@ func _cierre_con_cambios() -> void:
 	get_tree().quit()
 
 func _al_cerrar() -> void:
-	var estado := await _esperar(240.0, func(e: Dictionary) -> bool: return e.get("verified", false) or (not e.get("downloading", false) and not str(e.get("action_error", "")).is_empty()))
+	# Contra GitHub de verdad, un archivo recién subido puede tardar en bajar.
+	var espera := float(_datos.get("espera_descarga", 240.0))
+	var estado := await _esperar(espera, func(e: Dictionary) -> bool: return e.get("verified", false) or (not e.get("downloading", false) and not str(e.get("action_error", "")).is_empty()))
 	_guardar("descarga", {"estado": estado, "hora": _ahora()})
+	# Con una experiencia recién creada, la primera importación puede seguir en marcha.
+	var fin_importacion := Time.get_ticks_msec() + 180000
+	while EditorInterface.get_resource_filesystem().is_scanning() and Time.get_ticks_msec() < fin_importacion:
+		await get_tree().create_timer(0.25).timeout
+	_guardar("importado", {"escaneando": EditorInterface.get_resource_filesystem().is_scanning(), "hora": _ahora()})
 	EditorInterface.save_all_scenes()
 	# Cierre normal del editor, como la X de la ventana (no SceneTree.quit()).
 	EditorInterface.get_base_control().get_parent().notification(NOTIFICATION_WM_CLOSE_REQUEST)

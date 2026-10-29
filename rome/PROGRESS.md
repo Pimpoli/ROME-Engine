@@ -256,7 +256,30 @@ avoid Markdown markup. GitHub's API gives each asset a `digest` (`sha256:…`), 
 the updater requires. 0.1.0-alpha.2 is the first release with the updater;
 0.1.0-alpha.1 stayed a draft without one, so anyone holding it downloads
 alpha.2 manually once. Linux assets come from the manual `rome-release.yml`
-workflow (release tag input) once the release exists.
+workflow (release tag input) once the release exists. After publishing,
+`python rome/qa/updater/probar_release.py` checks the real thing: a copy of the
+build that claims the previous version (same-length patch) finds the release
+on GitHub, downloads and verifies it, installs it on close and, reopened, says
+it is current.
+
+Released: v0.1.0-alpha.2 on 2026-10-28, prerelease from commit e682de2, Windows
+asset `ROME-Studio-0.1.0-alpha.2-windows-x86_64.exe` (186,879,068 bytes, SHA-256
+face6fb5f4f70229e7b9b5667c5bb4f76448d1dba8a8989c8defb41aec4740e4) plus its
+`.sha256`. No Linux asset yet; the alpha.1 draft was left untouched.
+`probar_release.py` passed 13/13 against it: real API, size and digest check,
+clean close, install on close, reopened as alpha.2 and "current".
+
+Found by that check, still open:
+- From this machine GitHub served the asset at ~160 KB/s sustained (16 KB/s at
+  worst) while other hosts gave 29 MB/s, and cut the transfer after ~15 min
+  (curl error 56). Range requests work (206), but the updater neither resumes
+  nor retries, so on such a link an update never completes. Next: keep the
+  partial file and continue with `Range` across retries and sessions.
+- Closing the editor through the window-close path while a freshly copied
+  experience is still in its first import ends in STATUS_HEAP_CORRUPTION
+  (0xC0000374 in ntdll; seen twice, no Godot backtrace) before install on close
+  runs. Waiting for the scan avoids it, and ROMEUpdaterQA now waits. Locating
+  it needs a build with debug symbols; `--quit` during the import exits cleanly.
 
 Experiences update themselves (`RomeProjectTemplate::update_project`, called in
 `Main::setup` right before `register_core_extensions()`, the last moment the
