@@ -16,8 +16,8 @@ Con --desde <exe> parte de un ejecutable real ya publicado (la versión anterior
 tal cual la tienen los usuarios) en vez de una copia del build que finge serlo.
 El editor sigue abierto --espera-cierre segundos (60) antes de cerrarse: hasta la
 alpha.3, cerrarlo nada más arrancar se cae con 0xC0000374 (los temporizadores del
-SceneTree, rome/PROGRESS.md). Desde una versión con el arreglo, --espera-cierre 0
-es la prueba más dura.
+SceneTree, rome/PROGRESS.md). Desde la alpha.4, que trae el arreglo,
+--espera-cierre 0 es la prueba más dura.
 
     python rome/qa/updater/probar_release.py [--anterior 0.1.0-alpha.1 | --desde <exe>] [--descarga-propia] [--espera-cierre 60]
 """

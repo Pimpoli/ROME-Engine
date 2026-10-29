@@ -224,7 +224,7 @@ Known noise: GodotLuau's LuauLanguage misses `_get_public_*` virtuals, and Godot
 4.8 beta reports "update_scripts_classes already exists" when a nested main loop
 re-enters script class registration (the progress dialog guards it). The crash
 that sometimes followed that error while saving a scene was the SceneTree timer
-double free fixed after alpha.3 (updater notes below).
+double free fixed in alpha.4 (updater notes below).
 
 Updater and standalone executable (`editor/rome_update_manager.*`,
 `main/rome_update_helper.*`, packaging scripts):
@@ -249,7 +249,8 @@ Updater and standalone executable (`editor/rome_update_manager.*`,
   `python rome/qa/updater/probar_todo.py` (~25 min, opens editor windows).
 
 Release procedure (do not publish until the owner asks): raise `ROME_VERSION` in
-`core/version.h`, build, `python rome/package_runtime.py --rome-only`, build the
+`core/version.h` and the version in README.md, CONTRIBUTING.md, rome/UPSTREAM.md
+and the `release_tag` default of `.github/workflows/rome-release.yml`, build, `python rome/package_runtime.py --rome-only`, build the
 standalone with `rome/package_standalone.py`, run
 `python rome/qa/updater/probar_paquete.py --autonomo <exe>`, then publish a
 non-draft prerelease whose asset is `ROME-Studio-<version>-windows-x86_64.exe`
@@ -265,7 +266,7 @@ on GitHub, downloads and verifies it, installs it on close and, reopened, says
 it is current. `--desde <exe>` starts from the previous published executable
 instead of the patched copy; the editor stays open `--espera-cierre` seconds (60)
 before closing, because alpha.3 and older crash when closed right after startup
-(below); from a version with the fix, `--espera-cierre 0` is the harder test.
+(below); from alpha.4 on, `--espera-cierre 0` is the harder test.
 
 Released: v0.1.0-alpha.2 on 2026-10-28, prerelease from commit e682de2, Windows
 asset `ROME-Studio-0.1.0-alpha.2-windows-x86_64.exe` (186,879,068 bytes, SHA-256
@@ -295,7 +296,7 @@ Found by that check:
   Closing ROME mid-download continues next time; "Cancelar" pauses and keeps
   the data. Test: `probar_editor.py reanudar` (local server cuts at 40 MB, editor
   killed, reopened: requests start at 40 MB and then 80 MB, verified, installed).
-- Fixed after alpha.3 (ships in the next release; alpha.2 and alpha.3 keep it):
+- Fixed in alpha.4 (alpha.2 and alpha.3 keep it):
   closing the editor within the first second after it opened ended in
   STATUS_HEAP_CORRUPTION (0xC0000374 at ntdll+0x118095, no Godot backtrace)
   before install on close ran, 4 of 4 with the published alpha.2 and clean when
@@ -325,6 +326,16 @@ Found by that check:
   frees the plugin mid-function (`Nonexistent function '_cerrar_sin_preguntas'
   in base 'previously freed'` in every al_cerrar log). It now sends the close and
   its "discard" answer deferred. The crash above stayed, so that was not it.
+
+Released: v0.1.0-alpha.4 on 2026-10-29, prerelease from commit 3fa7c91, Windows
+asset `ROME-Studio-0.1.0-alpha.4-windows-x86_64.exe` (186,884,189 bytes, SHA-256
+1682c59d7dc4ab35f418a7a9f189e026ce3bf6d804282bb714b1f5d7b13e5e54) plus its
+`.sha256`; the first release without the early-close crash. Checked from the
+published alpha.3 itself (`probar_release.py --desde
+bin/releases/0.1.0-alpha.3/ROME-Studio-0.1.0-alpha.3-windows-x86_64.exe`):
+13/13 with the editor closed 60 s after start. The whole run, download from
+GitHub included, took under 3 minutes: the 160 KB/s of 2026-10-28 was not
+permanent.
 
 Experiences update themselves (`RomeProjectTemplate::update_project`, called in
 `Main::setup` right before `register_core_extensions()`, the last moment the
