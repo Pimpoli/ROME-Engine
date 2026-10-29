@@ -4,9 +4,9 @@ ROME desarrolla una interfaz y un flujo de creación propios sobre Godot, con
 Luau integrado mediante GodotLuau. Agradecemos correcciones, mejoras de uso,
 documentación y pruebas reproducibles.
 
-La versión pública actual es **0.1.0-alpha.3**. Las descargas y su estado por
+La versión pública actual es **0.1.0-alpha.4**. Las descargas y su estado por
 plataforma se publican en la
-[pre-release correspondiente](https://github.com/Pimpoli/ROME-Engine/releases/tag/v0.1.0-alpha.3).
+[pre-release correspondiente](https://github.com/Pimpoli/ROME-Engine/releases/tag/v0.1.0-alpha.4).
 
 ## Errores y propuestas
 

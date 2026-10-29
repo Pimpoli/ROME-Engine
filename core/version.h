@@ -33,7 +33,7 @@
 #include "core/version_generated.gen.h" // IWYU pragma: export
 
 // ROME's public release number is separate from the inherited engine ABI.
-#define ROME_VERSION "0.1.0-alpha.3"
+#define ROME_VERSION "0.1.0-alpha.4"
 #define ROME_VERSION_FULL_NAME "ROME Engine " ROME_VERSION
 
 // Copied from typedefs.h to stay lean.
