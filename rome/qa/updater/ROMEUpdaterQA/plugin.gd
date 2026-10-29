@@ -112,9 +112,13 @@ func _al_cerrar() -> void:
 	while EditorInterface.get_resource_filesystem().is_scanning() and Time.get_ticks_msec() < fin_importacion:
 		await get_tree().create_timer(0.25).timeout
 	_guardar("importado", {"escaneando": EditorInterface.get_resource_filesystem().is_scanning(), "hora": _ahora()})
+	var antes_de_cerrar := float(_datos.get("espera_antes_de_cerrar", 0.0))
+	if antes_de_cerrar > 0.0:
+		await get_tree().create_timer(antes_de_cerrar).timeout
 	EditorInterface.save_all_scenes()
-	# Cierre normal del editor, como la X de la ventana (no SceneTree.quit()).
-	EditorInterface.get_base_control().get_parent().notification(NOTIFICATION_WM_CLOSE_REQUEST)
+	# Cierre normal del editor, como la X de la ventana (no SceneTree.quit()). En diferido: al
+	# cerrar, el editor borra los plugins, y borrar este a mitad de una función corrompe el montón.
+	EditorInterface.get_base_control().get_parent().call_deferred("notification", NOTIFICATION_WM_CLOSE_REQUEST)
 	await _cerrar_sin_preguntas(30.0)
 	_guardar("sigue_abierto", {"estado": _gestor().get_status(), "ventanas": _ventanas(), "hora": _ahora()})
 	get_tree().quit()
@@ -135,7 +139,8 @@ func _cerrar_sin_preguntas(segundos: float) -> void:
 		var confirmacion := _confirmacion_visible()
 		if confirmacion != null:
 			_guardar("aviso_al_cerrar", {"texto": confirmacion.dialog_text, "hora": _ahora()})
-			confirmacion.custom_action.emit("discard")
+			# En diferido, por lo mismo que el cierre de _al_cerrar.
+			confirmacion.call_deferred("emit_signal", "custom_action", "discard")
 
 func _menu_ayuda() -> bool:
 	for menu: PopupMenu in EditorInterface.get_base_control().get_parent().find_children("*", "PopupMenu", true, false):

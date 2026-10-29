@@ -14,8 +14,10 @@ sostenidos y cortes a los ~15 min, así que puede no terminar.
 
 Con --desde <exe> parte de un ejecutable real ya publicado (la versión anterior
 tal cual la tienen los usuarios) en vez de una copia del build que finge serlo.
+El editor sigue abierto --espera-cierre segundos (60) antes de cerrarse: cerrarlo
+nada más arrancar se cae con 0xC0000374 (rome/PROGRESS.md).
 
-    python rome/qa/updater/probar_release.py [--anterior 0.1.0-alpha.1 | --desde <exe>] [--descarga-propia]
+    python rome/qa/updater/probar_release.py [--anterior 0.1.0-alpha.1 | --desde <exe>] [--descarga-propia] [--espera-cierre 60]
 """
 import argparse
 import http.client
@@ -103,6 +105,7 @@ def main():
     parser.add_argument("--anterior", help="Versión que finge la copia (misma longitud que la publicada)")
     parser.add_argument("--descarga-propia", action="store_true", help="Que el actualizador baje el ejecutable él mismo")
     parser.add_argument("--desde", type=Path, help="Ejecutable real de una versión anterior (p. ej. la release ya publicada) en vez de una copia parcheada")
+    parser.add_argument("--espera-cierre", type=float, default=60, help="Segundos que sigue abierto el editor antes de cerrarlo")
     args = parser.parse_args()
     version = comun.version_rome()
     anterior = comun.version_de(args.desde) if args.desde else args.anterior or anterior_de(version)
@@ -128,7 +131,7 @@ def main():
         return informe.guardar()
     preparar_proyecto()
     espera = 1500 if args.descarga_propia else 120
-    (PROYECTO / "updater_qa.json").write_text(json.dumps({"etapa": "al_cerrar", "version_nueva": version, "espera_descarga": espera}), encoding="utf-8")
+    (PROYECTO / "updater_qa.json").write_text(json.dumps({"etapa": "al_cerrar", "version_nueva": version, "espera_descarga": espera, "espera_antes_de_cerrar": args.espera_cierre}), encoding="utf-8")
     entorno, base = comun.entorno_aislado("release")
     descarga = base / "local/ROMEEngine/updates" / version / comun.nombre_asset(version)
     if not args.descarga_propia:
@@ -140,7 +143,7 @@ def main():
         descarga.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(guardada, descarga)
 
-    codigo = abrir(entorno, "anterior", espera + 300)
+    codigo = abrir(entorno, "anterior", espera + 300 + args.espera_cierre)
     datos = resultado()
     estado = datos.get("descarga", {}).get("estado", {})
     informe.nota("estado tras descargar", {k: estado.get(k) for k in ("rome_status", "verified", "action_error")})
@@ -153,7 +156,7 @@ def main():
     informe.check(comun.version_de(INSTALADO, entorno) == version, f"El ejecutable instalado dice {version}")
     informe.check(sorted(p.name for p in INSTALADO.parent.iterdir()) == [INSTALADO.name], "No quedan copias ni temporales junto al ejecutable", sorted(p.name for p in INSTALADO.parent.iterdir()))
 
-    abrir(entorno, "nueva", 240)
+    informe.nota("salida al reabrir", abrir(entorno, "nueva", 240))
     datos = resultado()
     final = datos.get("reinicio_final", {})
     informe.check(datos.get("reinicio", {}).get("version") == version, f"Al volver a abrir ya es la {version}")

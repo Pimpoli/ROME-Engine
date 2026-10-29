@@ -260,7 +260,9 @@ workflow (release tag input) once the release exists. After publishing,
 `python rome/qa/updater/probar_release.py` checks the real thing: a copy of the
 build that claims the previous version (same-length patch) finds the release
 on GitHub, downloads and verifies it, installs it on close and, reopened, says
-it is current.
+it is current. `--desde <exe>` starts from the previous published executable
+instead of the patched copy; the editor stays open `--espera-cierre` seconds (60)
+before closing, because closing right after startup crashes (below).
 
 Released: v0.1.0-alpha.2 on 2026-10-28, prerelease from commit e682de2, Windows
 asset `ROME-Studio-0.1.0-alpha.2-windows-x86_64.exe` (186,879,068 bytes, SHA-256
@@ -268,6 +270,14 @@ face6fb5f4f70229e7b9b5667c5bb4f76448d1dba8a8989c8defb41aec4740e4) plus its
 `.sha256`. No Linux asset yet; the alpha.1 draft was left untouched.
 `probar_release.py` passed 13/13 against it: real API, size and digest check,
 clean close, install on close, reopened as alpha.2 and "current".
+
+Released: v0.1.0-alpha.3 on 2026-10-28, prerelease from commit c4f6158, Windows
+asset `ROME-Studio-0.1.0-alpha.3-windows-x86_64.exe` (186,884,188 bytes, SHA-256
+08913bf4fe2dae682b6f0672c965e2cacf933ab26ca6f05d6262d943a5559e73) plus its
+`.sha256`; the first release whose updater resumes downloads. Checked from the
+published alpha.2 itself (`probar_release.py --desde
+bin/releases/0.1.0-alpha.2/ROME-Studio-0.1.0-alpha.2-windows-x86_64.exe`):
+13/13 with the editor closed 60 s after start.
 
 Found by that check:
 - From this machine GitHub served the asset at ~160 KB/s sustained (16 KB/s at
@@ -282,11 +292,22 @@ Found by that check:
   Closing ROME mid-download continues next time; "Cancelar" pauses and keeps
   the data. Test: `probar_editor.py reanudar` (local server cuts at 40 MB, editor
   killed, reopened: requests start at 40 MB and then 80 MB, verified, installed).
-- Still open: closing the editor through the window-close path while a freshly copied
-  experience is still in its first import ends in STATUS_HEAP_CORRUPTION
-  (0xC0000374 in ntdll; seen twice, no Godot backtrace) before install on close
-  runs. Waiting for the scan avoids it, and ROMEUpdaterQA now waits. Locating
-  it needs a build with debug symbols; `--quit` during the import exits cleanly.
+- Still open: closing the editor through the window-close path within the first
+  seconds after it opens ends in STATUS_HEAP_CORRUPTION (0xC0000374 at
+  ntdll+0x118095, no Godot backtrace) before install on close runs; the
+  executable stays as it was and the update installs at the next close. With the
+  published alpha.2 it happened 4 times out of 4 (closed about a second after the
+  editor was ready, nothing unsaved, also with the experience already imported
+  and updated); closed 60 s after start it is clean (13/13). Not the first scan
+  (`is_scanning()` was already false) nor the cache cleanup (main thread, at
+  30 s); `--quit` right after start exits cleanly. Reproduce with
+  `probar_release.py --desde <alpha.2 exe> --espera-cierre 0`; locating it needs
+  an ASan build or one with debug symbols.
+- ROMEUpdaterQA sent the close request from inside its own coroutine: with
+  nothing unsaved the editor exits synchronously and `unload_editor_addons()`
+  frees the plugin mid-function (`Nonexistent function '_cerrar_sin_preguntas'
+  in base 'previously freed'` in every al_cerrar log). It now sends the close and
+  its "discard" answer deferred. The crash above stayed, so that was not it.
 
 Experiences update themselves (`RomeProjectTemplate::update_project`, called in
 `Main::setup` right before `register_core_extensions()`, the last moment the
