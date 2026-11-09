@@ -33,6 +33,28 @@ En el primer inicio, el editor extrae sus componentes a una **caché del usuario
 identificada por versión y paquete. Las siguientes ejecuciones reutilizan esa
 copia. Este paquete no utiliza un asistente de instalación.
 
+### Si Windows muestra un aviso
+
+ROME todavía no tiene firma digital, así que al abrir el `.exe` descargado
+Windows puede mostrar **«Windows protegió su PC»** con el editor desconocido. El
+aviso significa que Windows no reconoce al autor del archivo, no que haya
+detectado un virus. Para abrirlo:
+
+1. Pulsa **Más información**.
+2. Pulsa **Ejecutar de todas formas**.
+
+Normalmente solo sale con el archivo descargado desde el navegador: las
+actualizaciones que ROME instala por su cuenta no lo muestran.
+
+Descarga ROME solo desde [Releases](https://github.com/Pimpoli/ROME-Engine/releases).
+Para comprobar que el archivo es el publicado, abre PowerShell en la carpeta de la
+descarga, ejecuta este comando con el nombre de tu versión y compara el resultado
+con el SHA-256 de sus notas:
+
+```powershell
+Get-FileHash .\ROME-Studio-0.1.0-alpha.4-windows-x86_64.exe -Algorithm SHA256
+```
+
 ### Actualizaciones
 
 Desde la 0.1.0-alpha.2, ROME se actualiza solo: al arrancar consulta las
