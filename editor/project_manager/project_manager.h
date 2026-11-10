@@ -31,6 +31,7 @@
 #pragma once
 
 #include "scene/gui/dialogs.h"
+#include "core/object/worker_thread_pool.h"
 #include "scene/gui/scroll_container.h"
 
 class CheckBox;
@@ -92,6 +93,18 @@ class ProjectManager : public Control {
 	HFlowContainer *rome_project_cards = nullptr;
 	LineEdit *rome_search = nullptr;
 	int rome_page = 0;
+	int rome_sort = 0;
+	ConfirmationDialog *rome_remove_dialog = nullptr;
+	OptionButton *rome_remove_mode = nullptr;
+	String rome_remove_path;
+	void _rome_project_action(int p_action, const String &p_path);
+	void _rome_remove_confirmed();
+	void _rome_sort_changed(int p_index);
+	WorkerThreadPool::TaskID rome_size_task = WorkerThreadPool::INVALID_TASK_ID;
+	SafeFlag rome_size_cancel;
+	Dictionary rome_project_sizes;
+	void _rome_measure_sizes(Vector<String> p_paths);
+	void _rome_sizes_ready(const Dictionary &p_sizes);
 	void _rome_build_hub();
 	void _rome_show_page(int p_page);
 	void _rome_refresh_cards();

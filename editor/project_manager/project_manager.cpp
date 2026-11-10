@@ -2114,6 +2114,10 @@ ProjectManager::ProjectManager() {
 }
 
 ProjectManager::~ProjectManager() {
+	rome_size_cancel.set();
+	if (rome_size_task != WorkerThreadPool::INVALID_TASK_ID) {
+		WorkerThreadPool::get_singleton()->wait_for_task_completion(rome_size_task);
+	}
 	singleton = nullptr;
 	EditorInspector::cleanup_plugins();
 
