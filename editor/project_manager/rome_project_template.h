@@ -5,9 +5,11 @@
 class RomeProjectTemplate {
 	static String update_message;
 	static bool update_failed;
+	static String runtime_failure;
 
 public:
 	static String get_root();
+	static String get_failure();
 	static String get_identity();
 	static bool is_available();
 	static Error install(const String &p_path, const String &p_template);

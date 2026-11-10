@@ -143,7 +143,11 @@ void ProjectManager::_rome_new_template(const String &p_template) {
 	Error err = directory->make_dir(path);
 	if (err == OK) { err = RomeProjectTemplate::install(path, p_template); }
 	if (err != OK) {
-		_show_error("No se pudo crear la experiencia. Comprueba el paquete rome_runtime.");
+		String message = RomeProjectTemplate::get_failure();
+		if (message.is_empty()) {
+			message = err == ERR_FILE_NOT_FOUND ? String::utf8("ROME no encuentra sus componentes. Vuelve a descargar ROME.") : vformat(String::utf8("No se pudo crear la experiencia en \"%s\".\nComprueba que hay espacio libre y permiso de escritura en esa carpeta."), path);
+		}
+		_show_error(message);
 		return;
 	}
 	ProjectSettings::CustomMap initial;
@@ -626,4 +630,8 @@ void ProjectManager::_rome_build_hub() {
 	project_list->connect(ProjectList::SIGNAL_LIST_CHANGED, callable_mp(this, &ProjectManager::_rome_refresh_cards), CONNECT_DEFERRED);
 	_rome_show_page(0);
 	ROMEUpdateManager::install(this)->set_quit_callback(callable_mp(SceneTree::get_singleton(), &SceneTree::quit).bind(0));
+	// Without its runtime the hub has no images and cannot create experiences.
+	if (!RomeProjectTemplate::get_failure().is_empty()) {
+		callable_mp(this, &ProjectManager::_show_error).call_deferred(RomeProjectTemplate::get_failure(), Size2());
+	}
 }

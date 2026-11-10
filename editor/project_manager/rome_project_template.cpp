@@ -9,6 +9,7 @@
 
 String RomeProjectTemplate::update_message;
 bool RomeProjectTemplate::update_failed = false;
+String RomeProjectTemplate::runtime_failure;
 
 namespace {
 
@@ -108,6 +109,23 @@ String extract_runtime(unzFile p_archive, const String &p_cache) {
 		}
 	} while (unzGoToNextFile(p_archive) == UNZ_OK);
 	return String();
+}
+
+// A file removed by hand or quarantined by an antivirus leaves the cache
+// incomplete even though its completion mark is still there.
+bool runtime_intact(const String &p_cache, const PackedByteArray &p_manifest) {
+	Ref<JSON> json;
+	json.instantiate();
+	if (json->parse(String::utf8(reinterpret_cast<const char *>(p_manifest.ptr()), p_manifest.size())) != OK || json->get_data().get_type() != Variant::DICTIONARY) {
+		return true;
+	}
+	const Dictionary files = Dictionary(json->get_data()).get("files", Dictionary());
+	for (const KeyValue<Variant, Variant> &E : files) {
+		if (!FileAccess::exists(p_cache.path_join("project").path_join(E.key))) {
+			return false;
+		}
+	}
+	return true;
 }
 
 Dictionary read_json(const String &p_path) {
@@ -216,6 +234,9 @@ String RomeProjectTemplate::get_root() {
 		const String cache = OS::get_singleton()->get_cache_path().path_join("ROMEEngine/runtime").path_join(String(ROME_VERSION) + "-" + identity);
 		const String complete = cache.path_join("runtime.complete");
 		String failure;
+		if (FileAccess::exists(complete) && !runtime_intact(cache, manifest)) {
+			DirAccess::remove_absolute(complete);
+		}
 		if (!FileAccess::exists(complete)) {
 			failure = extract_runtime(archive, cache);
 			if (failure.is_empty() && !FileAccess::exists(cache.path_join("project/GodotLuau/godot_luau.gdextension"))) {
@@ -228,7 +249,8 @@ String RomeProjectTemplate::get_root() {
 		if (failure.is_empty()) {
 			runtime_root = cache;
 		} else {
-			ERR_PRINT(vformat(String::utf8("ROME no pudo preparar sus componentes en \"%s\": %s. Comprueba que hay espacio libre y permiso de escritura en esa carpeta y vuelve a abrir ROME."), cache, failure));
+			runtime_failure = vformat(String::utf8("ROME no pudo preparar sus componentes en \"%s\": %s.\nComprueba que hay espacio libre y permiso de escritura en esa carpeta, y que el antivirus no ha bloqueado ROME.\nDespués vuelve a abrir ROME."), cache, failure);
+			ERR_PRINT(runtime_failure);
 		}
 	}
 	if (archive != nullptr) {
@@ -238,6 +260,12 @@ String RomeProjectTemplate::get_root() {
 		runtime_root = sidecar;
 	}
 	return runtime_root;
+}
+
+// Why the runtime could not be extracted, for the hub to show; empty if it is ready.
+String RomeProjectTemplate::get_failure() {
+	get_root();
+	return runtime_failure;
 }
 
 String RomeProjectTemplate::get_identity() {
@@ -371,6 +399,7 @@ Error RomeProjectTemplate::update_project(const String &p_path) {
 	Vector<String> saved;
 	Vector<String> created;
 	Error err = OK;
+	bool runtime_broken = false;
 	for (const String &relative : replace) {
 		const String target = p_path.path_join(relative);
 		if (FileAccess::exists(target)) {
@@ -382,11 +411,13 @@ Error RomeProjectTemplate::update_project(const String &p_path) {
 		} else {
 			created.push_back(relative);
 		}
-		err = copy_file(root.path_join("project").path_join(relative), target);
+		const String source = root.path_join("project").path_join(relative);
+		err = copy_file(source, target);
 		if (err == OK && FileAccess::get_sha256(target) != String(shipped[relative])) {
 			err = ERR_FILE_CORRUPT;
 		}
 		if (err != OK) {
+			runtime_broken = err == ERR_FILE_CORRUPT || !FileAccess::exists(source);
 			break;
 		}
 	}
@@ -416,7 +447,7 @@ Error RomeProjectTemplate::update_project(const String &p_path) {
 		if (restored) {
 			remove_tree(backup);
 		}
-		if (err == ERR_FILE_CORRUPT && FileAccess::exists(root.path_join("runtime.complete"))) {
+		if (runtime_broken && FileAccess::exists(root.path_join("runtime.complete"))) {
 			// The next start extracts the runtime from the executable again.
 			DirAccess::remove_absolute(root.path_join("runtime.complete"));
 		}
