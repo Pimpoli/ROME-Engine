@@ -86,19 +86,22 @@ bool View3DController::gui_input(const Ref<InputEvent> &p_event, const Rect2 &p_
 		}
 
 		const real_t zoom_factor = 1 + (ZOOM_FREELOOK_MULTIPLIER - 1) * b->get_factor();
+		if (continuous_scroll_zoom && !b->is_pressed() && (b->get_button_index() == MouseButton::WHEEL_UP || b->get_button_index() == MouseButton::WHEEL_DOWN)) {
+			return true;
+		}
 		switch (b->get_button_index()) {
 			case MouseButton::WHEEL_UP: {
 				if (freelook) {
 					scale_freelook_speed(zoom_factor);
 				} else {
-					scale_cursor_distance(1.0 / zoom_factor);
+					_scroll_zoom(1.0 / zoom_factor);
 				}
 			} break;
 			case MouseButton::WHEEL_DOWN: {
 				if (freelook) {
 					scale_freelook_speed(1.0 / zoom_factor);
 				} else {
-					scale_cursor_distance(zoom_factor);
+					_scroll_zoom(zoom_factor);
 				}
 			} break;
 			default: {
@@ -293,12 +296,14 @@ bool View3DController::gui_input(const Ref<InputEvent> &p_event, const Rect2 &p_
 }
 
 void View3DController::cancel_navigation() {
+	scroll_zoom_pending = false;
 	navigating = false;
 	navigation_cancelled = true;
 	cursor = previous_cursor;
 }
 
 void View3DController::cursor_pan(const Ref<InputEventWithModifiers> &p_event, const Vector2 &p_relative) {
+	scroll_zoom_pending = false;
 	float pan_speed = translation_sensitivity / 150.0;
 	if (p_event.is_valid() && navigation_scheme == NAV_SCHEME_MAYA && p_event->is_shift_pressed()) {
 		pan_speed *= 10;
@@ -323,6 +328,7 @@ void View3DController::cursor_pan(const Ref<InputEventWithModifiers> &p_event, c
 }
 
 void View3DController::cursor_orbit(const Ref<InputEventWithModifiers> &p_event, const Vector2 &p_relative) {
+	scroll_zoom_pending = false;
 	if (lock_rotation) {
 		cursor_pan(p_event, p_relative);
 		return;
@@ -383,6 +389,7 @@ void View3DController::cursor_orbit(const Ref<InputEventWithModifiers> &p_event,
 }
 
 void View3DController::cursor_look(const Ref<InputEventWithModifiers> &p_event, const Vector2 &p_relative) {
+	scroll_zoom_pending = false;
 	if (orthogonal) {
 		cursor_pan(p_event, p_relative);
 		return;
@@ -478,10 +485,11 @@ void View3DController::update_camera(const real_t p_delta) {
 			cursor_interp.pos_y = cursor_interp.eye_pos_y + forward.y * cursor_interp.distance;
 			cursor_interp.pos_z = cursor_interp.eye_pos_z + forward.z * cursor_interp.distance;
 		} else {
-			if (translation_inertia > 0) {
-				cursor_interp.pos_x = Math::lerp(old_camera_cursor.pos_x, cursor.pos_x, MIN(1.0, p_delta * (1 / translation_inertia)));
-				cursor_interp.pos_y = Math::lerp(old_camera_cursor.pos_y, cursor.pos_y, MIN(1.0, p_delta * (1 / translation_inertia)));
-				cursor_interp.pos_z = Math::lerp(old_camera_cursor.pos_z, cursor.pos_z, MIN(1.0, p_delta * (1 / translation_inertia)));
+			const float position_inertia = scroll_zoom_pending ? zoom_inertia : translation_inertia;
+			if (position_inertia > 0) {
+				cursor_interp.pos_x = Math::lerp(old_camera_cursor.pos_x, cursor.pos_x, MIN(1.0, p_delta * (1 / position_inertia)));
+				cursor_interp.pos_y = Math::lerp(old_camera_cursor.pos_y, cursor.pos_y, MIN(1.0, p_delta * (1 / position_inertia)));
+				cursor_interp.pos_z = Math::lerp(old_camera_cursor.pos_z, cursor.pos_z, MIN(1.0, p_delta * (1 / position_inertia)));
 			}
 
 			if (zoom_inertia > 0) {
@@ -505,6 +513,9 @@ void View3DController::update_camera(const real_t p_delta) {
 		}
 	}
 
+	if (scroll_zoom_pending && Math::abs(cursor_interp.pos_x - cursor.pos_x) < 0.000001 && Math::abs(cursor_interp.pos_y - cursor.pos_y) < 0.000001 && Math::abs(cursor_interp.pos_z - cursor.pos_z) < 0.000001) {
+		scroll_zoom_pending = false;
+	}
 	if (p_delta == 0 || !equal) {
 		emit_signal(SNAME("cursor_interpolated"));
 	}
@@ -587,7 +598,40 @@ void View3DController::scale_freelook_speed(const float p_scale) {
 	emit_signal(SNAME("freelook_speed_scaled"));
 }
 
+void View3DController::_scroll_zoom(double p_scale) {
+	if (!continuous_scroll_zoom || orthogonal) {
+		scale_cursor_distance(p_scale);
+		return;
+	}
+	if (!Math::is_finite(p_scale) || p_scale <= 0 || p_scale == 1 || !Math::is_finite(cursor.distance)) {
+		return;
+	}
+	// Translate the orbit focus, keeping the camera's positive orbit radius.
+	// Unlike shrinking that radius, a dolly can cross the old focus indefinitely.
+	// A useful step floor avoids the near-zero movement of a tightly focused view;
+	// logarithmic scaling makes opposite wheel steps cancel each other exactly.
+	const double amount = MAX(double(cursor.distance), double(DISTANCE_DEFAULT)) * Math::log(p_scale);
+	Basis basis;
+	basis.rotate(Vector3(1, 0, 0), -cursor.x_rot);
+	basis.rotate(Vector3(0, 1, 0), -cursor.y_rot);
+	const Vector3 backward = basis.get_column(2);
+	const double x = cursor.pos_x + backward.x * amount;
+	const double y = cursor.pos_y + backward.y * amount;
+	const double z = cursor.pos_z + backward.z * amount;
+	if (!Math::is_finite(x) || !Math::is_finite(y) || !Math::is_finite(z)) {
+		return;
+	}
+	// Keep the double-precision coordinates even far from the world origin.
+	cursor.pos_x = x;
+	cursor.pos_y = y;
+	cursor.pos_z = z;
+	scroll_zoom_pending = true;
+	zoom_failed_attempts_count = 0;
+	emit_signal(SNAME("cursor_distance_scaled"));
+}
+
 void View3DController::scale_cursor_distance(const float p_scale) {
+	scroll_zoom_pending = false;
 	float min_distance = MAX(znear * 4, ZOOM_FREELOOK_MIN);
 	float max_distance = MIN(zfar / 4, ZOOM_FREELOOK_MAX);
 	if (unlikely(min_distance > max_distance)) {
@@ -704,6 +748,7 @@ void View3DController::set_freelook_enabled(const bool p_enabled) {
 	}
 
 	freelook = p_enabled;
+	scroll_zoom_pending = false;
 
 	// Sync interpolated cursor to cursor to "cut" interpolation jumps due to changing referential.
 	cursor = cursor_interp;

@@ -260,6 +260,8 @@ private:
 
 	Node *target_node = nullptr;
 	Point2 drop_pos;
+	bool rome_drag_wrapped = false;
+	Point2 rome_drag_cursor_start;
 
 	ObjectID focused_node_id;
 

@@ -2246,6 +2246,12 @@ void Node3DEditorViewport::_sinput(const Ref<InputEvent> &p_event) {
 		View3DController::NavigationMouseButton orbit_mouse_preference = (View3DController::NavigationMouseButton)EDITOR_GET("editors/3d/navigation/orbit_mouse_button").operator int();
 		View3DController::NavigationMouseButton pan_mouse_preference = (View3DController::NavigationMouseButton)EDITOR_GET("editors/3d/navigation/pan_mouse_button").operator int();
 		View3DController::NavigationMouseButton zoom_mouse_preference = (View3DController::NavigationMouseButton)EDITOR_GET("editors/3d/navigation/zoom_mouse_button").operator int();
+		const bool studio_navigation = bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && bool(EDITOR_GET("editors/3d/navigation/rome_studio_controls"));
+		if (studio_navigation) {
+			orbit_mouse_preference = View3DController::NAV_MOUSE_BUTTON_MIDDLE;
+			pan_mouse_preference = View3DController::NAV_MOUSE_BUTTON_MIDDLE;
+			zoom_mouse_preference = View3DController::NAV_MOUSE_BUTTON_MIDDLE;
+		}
 
 		switch (b->get_button_index()) {
 			case MouseButton::RIGHT: {
@@ -2295,6 +2301,9 @@ void Node3DEditorViewport::_sinput(const Ref<InputEvent> &p_event) {
 
 			} break;
 			case MouseButton::MIDDLE: {
+				if (studio_navigation) {
+					break; // Reserved for camera panning, including during a transform.
+				}
 				if (b->is_pressed() && _edit.mode != TRANSFORM_NONE) {
 					if (orbit_mouse_preference == View3DController::NAV_MOUSE_BUTTON_MIDDLE && _is_nav_modifier_pressed("spatial_editor/viewport_orbit_modifier_1") && _is_nav_modifier_pressed("spatial_editor/viewport_orbit_modifier_2")) {
 						break;
@@ -2637,7 +2646,22 @@ void Node3DEditorViewport::_sinput(const Ref<InputEvent> &p_event) {
 
 	// Instant transforms process mouse motion in input() to handle wrapping.
 	if (m.is_valid() && !_edit.instant) {
-		_edit.mouse_pos = m->get_position();
+		const bool continuous = _edit.mode != TRANSFORM_NONE && m->get_button_mask().has_flag(MouseButtonMask::LEFT) && _edit.gizmo.is_null() && !vertex_snap_mode && !vertex_snap_dragging && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && bool(EDITOR_GET("editors/3d/navigation/continuous_transform_grab"));
+		if (continuous) {
+			const Rect2 bounds = surface->get_global_rect().grow(-3 * EDSCALE);
+			if (bounds.size.x > 8 && bounds.size.y > 8) {
+				if (!bounds.has_point(m->get_global_position()) && !rome_drag_wrapped) {
+					rome_drag_cursor_start = surface->get_global_transform().xform(_edit.original_mouse_pos);
+					rome_drag_wrapped = true;
+				}
+				// Keep a virtual cursor: relocation events must not jump the transform.
+				_edit.mouse_pos += Input::get_singleton()->warp_mouse_motion(m, bounds);
+			} else {
+				_edit.mouse_pos = m->get_position();
+			}
+		} else {
+			_edit.mouse_pos = m->get_position();
+		}
 
 		if (vertex_snap_mode || vertex_snap_dragging) {
 			if (!vertex_snap_dragging) {
@@ -3082,6 +3106,13 @@ void Node3DEditorViewport::_cursor_interpolated() {
 }
 
 void Node3DEditorViewport::_cursor_distance_scaled() {
+	if (view_3d_controller->is_scroll_zoom_pending()) {
+		// Free wheel travel has no bounded orbit-distance gauge.
+		zoom_indicator_delay = 0;
+		zoom_limit_label->hide();
+		surface->queue_redraw();
+		return;
+	}
 	zoom_indicator_delay = ZOOM_FREELOOK_INDICATOR_DELAY_S;
 	surface->queue_redraw();
 }
@@ -4025,6 +4056,21 @@ void Node3DEditorViewport::_update_view_3d_controller(bool p_update_all) {
 		view_3d_controller->set_invert_y_axis(EDITOR_GET("editors/3d/navigation/invert_y_axis"));
 
 		view_3d_controller->set_warped_mouse_panning((View3DController::NavigationMouseButton)EDITOR_GET("editors/3d/navigation/warped_mouse_panning").operator int());
+	}
+	const bool studio_controls = bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && bool(EDITOR_GET("editors/3d/navigation/rome_studio_controls"));
+	view_3d_controller->set_continuous_scroll_zoom(studio_controls);
+	if (studio_controls) {
+		// MMB pans without Shift, RMB retains native look/WASD. Keep an explicit
+		// Alt+MMB orbit gesture and Ctrl+MMB zoom; don't rewrite user shortcuts.
+		view_3d_controller->set_pan_mouse_button(View3DController::NAV_MOUSE_BUTTON_MIDDLE);
+		view_3d_controller->set_orbit_mouse_button(View3DController::NAV_MOUSE_BUTTON_MIDDLE);
+		view_3d_controller->set_zoom_mouse_button(View3DController::NAV_MOUSE_BUTTON_MIDDLE);
+		view_3d_controller->set_shortcut(View3DController::SHORTCUT_PAN_MOD_1, ED_GET_SHORTCUT("rome/camera_pan_modifier"));
+		view_3d_controller->set_shortcut(View3DController::SHORTCUT_PAN_MOD_2, ED_GET_SHORTCUT("rome/camera_pan_modifier"));
+		view_3d_controller->set_shortcut(View3DController::SHORTCUT_ORBIT_MOD_1, ED_GET_SHORTCUT("rome/camera_orbit_modifier"));
+		view_3d_controller->set_shortcut(View3DController::SHORTCUT_ORBIT_MOD_2, ED_GET_SHORTCUT("rome/camera_pan_modifier"));
+		view_3d_controller->set_shortcut(View3DController::SHORTCUT_ORBIT_SNAP_MOD_1, ED_GET_SHORTCUT("rome/camera_orbit_snap_modifier"));
+		view_3d_controller->set_shortcut(View3DController::SHORTCUT_ORBIT_SNAP_MOD_2, ED_GET_SHORTCUT("rome/camera_pan_modifier"));
 	}
 }
 
@@ -6830,6 +6876,12 @@ void Node3DEditorViewport::update_transform_numeric() {
 
 // Perform cleanup after a transform operation is committed or canceled.
 void Node3DEditorViewport::finish_transform() {
+	if (rome_drag_wrapped) {
+		if (get_window()->has_focus() && Input::get_singleton()->get_mouse_mode() == Input::MouseMode::MOUSE_MODE_VISIBLE) {
+			Input::get_singleton()->warp_mouse(rome_drag_cursor_start);
+		}
+		rome_drag_wrapped = false;
+	}
 	_edit.mode = TRANSFORM_NONE;
 	_edit.instant = false;
 	_edit.numeric_input = 0;
@@ -6910,6 +6962,9 @@ void Node3DEditorViewport::_load_viewport_inputs() {
 	register_shortcut_action("spatial_editor/viewport_orbit_snap_modifier_1", TTRC("Viewport Orbit Snap Modifier 1"), Key::ALT);
 	register_shortcut_action("spatial_editor/viewport_orbit_snap_modifier_2", TTRC("Viewport Orbit Snap Modifier 2"), Key::NONE);
 	register_shortcut_action("spatial_editor/viewport_pan_modifier_1", TTRC("Viewport Pan Modifier 1"), Key::SHIFT);
+	register_shortcut_action("rome/camera_pan_modifier", "Studio Camera Pan Modifier", Key::NONE);
+	register_shortcut_action("rome/camera_orbit_modifier", "Studio Camera Orbit Modifier", Key::ALT);
+	register_shortcut_action("rome/camera_orbit_snap_modifier", "Studio Camera Orbit Snap Modifier", Key::SHIFT);
 	register_shortcut_action("spatial_editor/viewport_pan_modifier_2", TTRC("Viewport Pan Modifier 2"), Key::NONE);
 	register_shortcut_action("spatial_editor/viewport_zoom_modifier_1", TTRC("Viewport Zoom Modifier 1"), Key::CTRL);
 	register_shortcut_action("spatial_editor/viewport_zoom_modifier_2", TTRC("Viewport Zoom Modifier 2"), Key::NONE);
