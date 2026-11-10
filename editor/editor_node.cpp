@@ -1355,6 +1355,9 @@ void EditorNode::_execute_upgrades() {
 	}
 }
 
+// Defined in rome_studio.cpp.
+void rome_check_studio_plugin();
+
 void EditorNode::init_plugins() {
 	_initializing_plugins = true;
 	Vector<String> addons;
@@ -1369,6 +1372,8 @@ void EditorNode::init_plugins() {
 
 	if (!pending_addons.is_empty()) {
 		EditorFileSystem::get_singleton()->connect("script_classes_updated", callable_mp(this, &EditorNode::_enable_pending_addons), CONNECT_ONE_SHOT);
+	} else {
+		callable_mp_static(&rome_check_studio_plugin).call_deferred();
 	}
 }
 
@@ -6458,6 +6463,7 @@ void EditorNode::_enable_pending_addons() {
 		set_addon_plugin_enabled(pending_addons[i], true);
 	}
 	pending_addons.clear();
+	rome_check_studio_plugin();
 }
 
 void EditorNode::_file_dialog_register(FileDialog *p_dialog) {

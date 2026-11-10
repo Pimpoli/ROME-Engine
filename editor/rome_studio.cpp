@@ -26,6 +26,9 @@
 #include "core/object/editor_language.h"
 #include "core/object/script_language_extension.h"
 #include "editor/gui/editor_toaster.h"
+#include "editor/file_system/editor_file_system.h"
+#include "scene/gui/dialogs.h"
+#include "servers/display/display_server.h"
 #include "scene/gui/code_edit.h"
 #include "scene/gui/popup_menu.h"
 #include "scene/3d/node_3d.h"
@@ -72,6 +75,36 @@ void rome_fit_header_popup(PopupMenu *p_menu) {
 	position.x = MIN(position.x, (int)Math::floor(button_rect.get_end().x) - width);
 	p_menu->set_position(position);
 }
+}
+
+// The toolbar, the Explorer and Properties are driven by the ROMEStudio addon.
+// A script error or the plugin list can turn it off, and then its buttons do nothing.
+void rome_check_studio_plugin() {
+	const String addon = "res://addons/ROMEStudio/plugin.cfg";
+	EditorNode *editor = EditorNode::get_singleton();
+	if (!bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) || editor->is_addon_plugin_enabled(addon)) {
+		return;
+	}
+	// Imports and exports run without anyone to answer.
+	if (EditorNode::is_cmdline_mode() || DisplayServer::get_singleton()->get_name() == "headless") {
+		return;
+	}
+	if (EditorFileSystem::get_singleton()->is_scanning()) {
+		// The scan shows its own progress window; ask once it is gone.
+		EditorFileSystem::get_singleton()->connect("filesystem_changed", callable_mp_static(&rome_check_studio_plugin), Object::CONNECT_ONE_SHOT | Object::CONNECT_DEFERRED);
+		return;
+	}
+	WARN_PRINT(String::utf8("ROMEStudio está desactivado: la barra de herramientas, el Explorador y Propiedades de ROME no funcionan sin él."));
+	ConfirmationDialog *dialog = memnew(ConfirmationDialog);
+	dialog->set_title("ROME Studio");
+	dialog->set_text(String::utf8("El plugin ROMEStudio está desactivado.\nSin él no funcionan la barra de herramientas, el Explorador ni Propiedades de ROME."));
+	dialog->set_ok_button_text("Reactivar");
+	dialog->set_cancel_button_text("Ahora no");
+	// Godot may be showing its own warning about the addon at this moment.
+	dialog->set_exclusive(false);
+	dialog->connect(SceneStringName(confirmed), callable_mp(editor, &EditorNode::set_addon_plugin_enabled).bind(addon, true, true));
+	EditorInterface::get_singleton()->get_base_control()->add_child(dialog);
+	dialog->popup_centered();
 }
 
 void EditorNode::_rome_fit_tab_strip(HBoxContainer *p_mezzanine, Control *p_left_gap, Control *p_right_gap, ScrollContainer *p_tabs) {
