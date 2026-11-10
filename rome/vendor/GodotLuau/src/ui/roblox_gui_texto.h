@@ -228,7 +228,7 @@
     ADD_PROPERTY(PropertyInfo(Variant::INT,  "TextTruncate", PROPERTY_HINT_ENUM,"None,AtEnd,SplitWord"), "set_TextTruncate","get_TextTruncate"); \
     ADD_PROPERTY(PropertyInfo(Variant::FLOAT,"LineHeight"),       "set_LineHeight","get_LineHeight"); \
     ADD_PROPERTY(PropertyInfo(Variant::INT,  "MaxVisibleGraphemes"), "set_MaxVisibleGraphemes","get_MaxVisibleGraphemes");   \
-    ADD_PROPERTY(PropertyInfo(Variant::INT,  "TextDirection"), "set_TextDirection","get_TextDirection"); \
+    ADD_PROPERTY(PropertyInfo(Variant::INT,  "RobloxTextDirection"), "set_TextDirection","get_TextDirection"); \
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "TextScaled"), "set_text_scaled","get_text_scaled"); \
     ADD_PROPERTY(PropertyInfo(Variant::BOOL, "RichText"),   "set_rich_text","get_rich_text");
 

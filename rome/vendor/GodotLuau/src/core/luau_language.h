@@ -37,6 +37,10 @@ public:
     void _add_global_constant(const StringName&, const Variant&) override {}
     void _add_named_global_constant(const StringName&, const Variant&) override {}
     void _remove_named_global_constant(const StringName&) override {}
+    // Editor symbol search calls these even when Luau supplies its own completion.
+    TypedArray<Dictionary> _get_public_functions() const override { return {}; }
+    Dictionary _get_public_constants() const override { return {}; }
+    TypedArray<Dictionary> _get_public_annotations() const override { return {}; }
 
     String _get_name()      const override { return "Luau"; }
     String _get_type()      const override { return "LuauScript"; }

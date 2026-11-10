@@ -68,7 +68,7 @@ protected:
         ClassDB::bind_method(D_METHOD("set_jump_power", "p"),    &RobloxPlayer2D::set_jump_power);
         ClassDB::bind_method(D_METHOD("get_jump_power"),          &RobloxPlayer2D::get_jump_power);
         ClassDB::bind_method(D_METHOD("set_gravity", "g"),       &RobloxPlayer2D::set_gravity_value);
-        ClassDB::bind_method(D_METHOD("get_gravity"),             &RobloxPlayer2D::get_gravity_value);
+        ClassDB::bind_method(D_METHOD("get_roblox_gravity"),             &RobloxPlayer2D::get_gravity_value);
 
         ADD_GROUP("Movimiento 2D", "");
         ADD_PROPERTY(
@@ -83,7 +83,7 @@ protected:
             "set_jump_power", "get_jump_power");
         ADD_PROPERTY(
             PropertyInfo(Variant::FLOAT, "Gravity2D", PROPERTY_HINT_RANGE, "0,3000,10"),
-            "set_gravity", "get_gravity");
+            "set_gravity", "get_roblox_gravity");
 
         ADD_GROUP("Camara 2D", "");
         ADD_PROPERTY(
