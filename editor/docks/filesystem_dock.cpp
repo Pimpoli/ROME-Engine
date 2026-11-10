@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "filesystem_dock.h"
+#include "editor/gui/progress_dialog.h"
 
 #include "core/config/project_settings.h"
 #include "core/input/input.h"
@@ -4513,7 +4514,75 @@ void FileSystemDock::_on_open_editor_settings_file_exts() {
 	ed_settings->set_current_section("docks/filesystem");
 }
 
+bool FileSystemDock::rome_is_resource_operation_ready() const {
+	return !EditorFileSystem::get_singleton()->is_scanning() && !EditorFileSystem::get_singleton()->is_importing() && !ProgressDialog::get_singleton()->has_tasks();
+}
+
+Error FileSystemDock::rome_relocate_resource(const String &p_source, const String &p_destination) {
+	// Use the native resource relocation pipeline, including dependencies, UIDs,
+	// open scenes, favorites and project settings. Never overwrite another asset.
+	const String source = p_source.trim_suffix("/").simplify_path();
+	const String destination = p_destination.trim_suffix("/").simplify_path();
+	auto editable_path = [](const String &p_path) {
+		if (!p_path.begins_with("res://") || p_path == "res://" || p_path.contains("/../")) {
+			return false;
+		}
+		const String relative = p_path.trim_prefix("res://");
+		const String first = relative.get_slice("/", 0).to_lower();
+		return !relative.begins_with(".") && first != "addons" && first != "godotluau" && first != "project.godot";
+	};
+	if (!editable_path(source) || !editable_path(destination) || destination.begins_with(source + "/")) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!rome_is_resource_operation_ready()) {
+		return ERR_BUSY;
+	}
+	const bool directory = DirAccess::dir_exists_absolute(source);
+	if ((!directory && !FileAccess::exists(source)) || !DirAccess::dir_exists_absolute(destination.get_base_dir())) {
+		return ERR_FILE_NOT_FOUND;
+	}
+	if (source == destination) {
+		return OK;
+	}
+	if (!destination.get_file().is_valid_filename() || destination.get_file().begins_with(".") || destination.get_file().ends_with(".")) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!directory && source.get_extension() != destination.get_extension()) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (FileAccess::exists(destination) || DirAccess::dir_exists_absolute(destination)) {
+		return ERR_ALREADY_EXISTS;
+	}
+	to_move.clear();
+	const FileOrFolder item(directory ? source + "/" : source, !directory);
+	to_move.push_back(item);
+	HashSet<String> owners;
+	_before_move(owners);
+	HashMap<String, String> file_renames;
+	HashMap<String, String> folder_renames;
+	_try_move_item(item, destination, file_renames, folder_renames);
+	if (file_renames.is_empty() && folder_renames.is_empty()) {
+		to_move.clear();
+		return FAILED;
+	}
+	if (!directory && EditorFileSystem::get_singleton()->is_group_file(source)) {
+		EditorFileSystem::get_singleton()->move_group_file(source, destination);
+	}
+	const int current_tab = EditorSceneTabs::get_singleton()->get_current_tab();
+	_update_resource_paths_after_move(file_renames);
+	_update_dependencies_after_move(file_renames, owners);
+	_update_project_settings_after_move(file_renames, folder_renames);
+	_update_favorites_after_move(file_renames, folder_renames);
+	EditorSceneTabs::get_singleton()->set_current_tab(current_tab);
+	select_after_scan = destination;
+	to_move.clear();
+	_rescan();
+	return OK;
+}
+
 void FileSystemDock::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("rome_relocate_resource", "source", "destination"), &FileSystemDock::rome_relocate_resource);
+	ClassDB::bind_method(D_METHOD("rome_is_resource_operation_ready"), &FileSystemDock::rome_is_resource_operation_ready);
 	ClassDB::bind_method(D_METHOD("navigate_to_path", "path"), &FileSystemDock::navigate_to_path);
 
 	ClassDB::bind_method(D_METHOD("add_resource_tooltip_plugin", "plugin"), &FileSystemDock::add_resource_tooltip_plugin);

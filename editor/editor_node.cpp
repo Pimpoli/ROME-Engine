@@ -788,7 +788,16 @@ void EditorNode::_rome_set_3d_tool(int p_mode) {
 		return;
 	}
 	Node3DEditor *editor = Node3DEditor::get_singleton();
-	if (editor) {
+	if (editor_main_screen && CanvasItemEditor::get_singleton() && editor_main_screen->get_current_tab_control() == CanvasItemEditor::get_singleton()) {
+		CanvasItemManipulator::Tool tool = CanvasItemManipulator::TOOL_SELECT;
+		switch (p_mode) {
+			case Node3DEditor::TOOL_MODE_MOVE: tool = CanvasItemManipulator::TOOL_MOVE; break;
+			case Node3DEditor::TOOL_MODE_ROTATE: tool = CanvasItemManipulator::TOOL_ROTATE; break;
+			case Node3DEditor::TOOL_MODE_SCALE: tool = CanvasItemManipulator::TOOL_SCALE; break;
+			default: break;
+		}
+		CanvasItemEditor::get_singleton()->set_current_tool(tool);
+	} else if (editor) {
 		editor->set_tool_mode((Node3DEditor::ToolMode)p_mode);
 	}
 	if (rome_pages_row) {
@@ -5029,6 +5038,8 @@ bool EditorNode::is_multi_window_enabled() const {
 }
 
 int EditorNode::new_scene() {
+	const bool scene_2d = bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && (rome_next_scene_dimension == 2 || (rome_next_scene_dimension == 0 && rome_get_scene_view() == "2D"));
+	rome_next_scene_dimension = 0;
 	int idx = editor_data.add_edited_scene(-1);
 	_set_current_scene(idx); // Before trying to remove an empty scene, set the current tab index to the newly added tab index.
 
@@ -5045,9 +5056,10 @@ int EditorNode::new_scene() {
 
 	editor_data.clear_editor_states();
 	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
-		Node3D *model = memnew(Node3D);
-		model->set_name("Model");
+		Node *model = scene_2d ? static_cast<Node *>(memnew(Node2D)) : static_cast<Node *>(memnew(Node3D));
+		model->set_name(scene_2d ? "Scene2D" : "Model");
 		SceneTreeDock::get_singleton()->add_root_node(model);
+		_rome_set_workspace(scene_2d ? "2D" : "3D");
 	}
 	scene_tabs->update_scene_tabs();
 	return idx;
@@ -5739,9 +5751,9 @@ void EditorNode::_project_run_stopped() {
 	if (action_on_stop == ACTION_ON_STOP_CLOSE_BUTTOM_PANEL) {
 		bottom_panel->hide_bottom_panel();
 	}
-	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && editor_main_screen->get_current_tab_control() != ScriptEditor::get_singleton() && Object::cast_to<Node3D>(editor_data.get_edited_scene_root())) {
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && editor_main_screen->get_current_tab_control() != ScriptEditor::get_singleton() && editor_data.get_edited_scene_root()) {
 		// Studio returns to the edited world when a test stops.
-		EditorInterface::get_singleton()->set_main_screen_editor("3D");
+		EditorInterface::get_singleton()->set_main_screen_editor(rome_get_scene_view());
 	}
 }
 
@@ -6657,7 +6669,53 @@ void EditorNode::_load_editor_layout() {
 		EditorSettings::get_singleton()->set_project_metadata("rome", "workspace_revision", 5);
 		save_editor_layout_delayed();
 	}
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && int(EditorSettings::get_singleton()->get_project_metadata("rome", "workspace_revision", 0)) < 6) {
+		// Follow previous default placements without moving a customized or floating dock.
+		Ref<ConfigFile> resources_layout;
+		resources_layout.instantiate();
+		editor_dock_manager->save_docks_to_config(resources_layout, "docks");
+		const String resources = "ROMEAssets";
+		const String destination = DockTabContainer::get_config_key(EditorDock::DOCK_SLOT_LEFT_BL);
+		const Dictionary floating = resources_layout->get_value("docks", "dock_floating", Dictionary());
+		bool default_position = false;
+		for (int slot : { int(EditorDock::DOCK_SLOT_BOTTOM), int(EditorDock::DOCK_SLOT_RIGHT_BR), int(EditorDock::DOCK_SLOT_LEFT_BL), -1 }) {
+			const String key = DockTabContainer::get_config_key(slot);
+			if (String(resources_layout->get_value("docks", key, "")).split(",", false).has(resources)) {
+				default_position = true;
+			}
+		}
+		if (default_position && !floating.has(resources)) {
+			for (int slot = -1; slot < EditorDock::DOCK_SLOT_MAX; slot++) {
+				const String key = DockTabContainer::get_config_key(slot);
+				Vector<String> names = String(resources_layout->get_value("docks", key, "")).split(",", false);
+				const int index = names.find(resources);
+				if (index < 0) {
+					continue;
+				}
+				names.remove_at(index);
+				int selected = resources_layout->get_value("docks", key + "_selected_tab_idx", -1);
+				if (selected >= index) {
+					selected = MAX(-1, selected - 1);
+				}
+				resources_layout->set_value("docks", key, String(",").join(names));
+				resources_layout->set_value("docks", key + "_selected_tab_idx", selected);
+			}
+			Vector<String> names = String(resources_layout->get_value("docks", destination, "")).split(",", false);
+			names.insert(0, resources);
+			resources_layout->set_value("docks", destination, String(",").join(names));
+			resources_layout->set_value("docks", destination + "_selected_tab_idx", 0);
+			Array closed = resources_layout->get_value("docks", "dock_closed", Array());
+			closed.erase(resources);
+			resources_layout->set_value("docks", "dock_closed", closed);
+			editor_dock_manager->load_docks_from_config(resources_layout, "docks", true);
+		}
+		EditorSettings::get_singleton()->set_project_metadata("rome", "workspace_revision", 6);
+		save_editor_layout_delayed();
+	}
 	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		if (err != OK && !overridden_default_layout) {
+			_rome_apply_studio_layout();
+		}
 		callable_mp(this, &EditorNode::_rome_prefer_world_view).call_deferred();
 	}
 	load_editor_layout_done = true;
@@ -6924,6 +6982,33 @@ void EditorNode::cleanup() {
 	_init_callbacks.clear();
 }
 
+void EditorNode::_rome_apply_studio_layout() {
+	editor_dock_manager->move_dock_to_slot(SceneTreeDock::get_singleton(), EditorDock::DOCK_SLOT_RIGHT_UR);
+	editor_dock_manager->move_dock_to_slot(InspectorDock::get_singleton(), EditorDock::DOCK_SLOT_RIGHT_BR);
+	editor_dock_manager->move_dock_to_slot(log, EditorDock::DOCK_SLOT_BOTTOM);
+
+	// Keep custom resource placements and floating windows. In the standard
+	// left slot Resources is available on demand, leaving more room for the world.
+	EditorDock *resources = editor_dock_manager->get_dock_by_name("Recursos");
+	if (resources && resources->get_current_slot() == EditorDock::DOCK_SLOT_LEFT_BL && resources->get_current_layout() == EditorDock::DOCK_LAYOUT_VERTICAL) {
+		editor_dock_manager->close_dock(resources);
+	}
+
+	right_r_vsplit->set_split_offset(0);
+	PackedInt32Array offsets = main_hsplit->get_split_offsets();
+	if (right_r_vsplit->is_visible() && !offsets.is_empty()) {
+		offsets.set(offsets.size() - 1, -280 * EDSCALE);
+		main_hsplit->set_split_offsets(offsets);
+	}
+
+	// Re-select through the bottom panel to update its splitter after re-docking.
+	if (log->get_parent() == bottom_panel) {
+		bottom_panel->set_current_tab(-1);
+		bottom_panel->set_current_tab(bottom_panel->get_tab_idx_from_control(log));
+	}
+	save_editor_layout_delayed();
+}
+
 void EditorNode::_update_layouts_menu() {
 	editor_layouts->clear();
 	overridden_default_layout = false;
@@ -6941,6 +7026,9 @@ void EditorNode::_update_layouts_menu() {
 	}
 
 	editor_layouts->add_shortcut(ED_SHORTCUT("layout/default", overridden_default_layout ? TTRC("Default (Overridden)") : TTRC("Default")), LAYOUT_DEFAULT);
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		editor_layouts->add_item("Estilo Studio", LAYOUT_ROME_STUDIO);
+	}
 
 	if (err != OK) {
 		return; // No config.
@@ -6967,6 +7055,10 @@ void EditorNode::_layout_menu_option(int p_id) {
 			current_menu_option = p_id;
 			layout_dialog->set_save_mode_enabled(false);
 			layout_dialog->popup_centered();
+		} break;
+
+		case LAYOUT_ROME_STUDIO: {
+			_rome_apply_studio_layout();
 		} break;
 
 		case LAYOUT_DEFAULT: {
@@ -8194,11 +8286,17 @@ void EditorNode::_feature_profile_changed() {
 }
 
 void EditorNode::_bind_methods() {
+	// Background backups must not stop a running game (Save All normally does).
+	ClassDB::bind_method(D_METHOD("rome_save_all_scenes"), &EditorNode::_save_all_scenes);
 	ClassDB::bind_method(D_METHOD("rome_create_custom_tab", "name"), &EditorNode::_rome_create_custom_tab);
 	ClassDB::bind_method(D_METHOD("rome_get_custom_tabs"), &EditorNode::_rome_get_custom_tabs);
+	ClassDB::bind_method(D_METHOD("rome_get_toolbar_options"), &EditorNode::_rome_get_toolbar_options);
+	ClassDB::bind_method(D_METHOD("rome_set_toolbar_options", "options"), &EditorNode::_rome_set_toolbar_options);
 	ClassDB::bind_method(D_METHOD("rome_set_custom_tools", "tab", "tools"), &EditorNode::_rome_set_custom_tools);
 	ClassDB::bind_method(D_METHOD("rome_remove_custom_tab", "tab"), &EditorNode::_rome_remove_custom_tab);
 	ClassDB::bind_method(D_METHOD("rome_new_component_scene"), &EditorNode::new_scene);
+	ClassDB::bind_method(D_METHOD("rome_new_component_scene_with_dimension", "dimension"), &EditorNode::_rome_new_component_scene_with_dimension);
+	ClassDB::bind_method(D_METHOD("rome_get_scene_view"), &EditorNode::rome_get_scene_view);
 	ClassDB::bind_method(D_METHOD("push_item", "object", "property", "inspector_only"), &EditorNode::push_item, DEFVAL(""), DEFVAL(false));
 
 	ClassDB::bind_method("set_edited_scene", &EditorNode::set_edited_scene);
@@ -9233,6 +9331,7 @@ EditorNode::EditorNode() {
 	distraction_free->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_toggle_distraction_free_mode));
 
 	editor_main_screen = memnew(EditorMainScreen);
+	editor_main_screen->connect("tab_changed", callable_mp(this, &EditorNode::_rome_workspace_changed));
 	srt->add_child(editor_main_screen);
 	title_bar->set_center_control(editor_main_screen->get_internal_container());
 
@@ -10051,7 +10150,7 @@ EditorNode::EditorNode() {
 		default_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", offsets);
 	}
 
-	// Studio's default workspace: properties left, explorer right, output under the world.
+	// The classic ROME layout remains available in the layout menu.
 	for (int i = 0; i < 8; i++) {
 		default_layout->set_value(docks_section, DockTabContainer::get_config_key(i), "");
 	}

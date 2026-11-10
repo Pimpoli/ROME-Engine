@@ -33,13 +33,19 @@ const HEADER := Color("25262d")
 const REMOVE := 0
 
 static var folded: Dictionary = {}
+static var property_folded: Dictionary = {}
 
-var target: Node
+var target: Object
+var targets: Array[Node] = []
+var scene_origin: Node
+var multi := false
 var filter := ""
 var shown: Dictionary = {}
 var table: Tree
 var add_button: Button
 var rows: Dictionary = {}
+var component_rows: Array[TreeItem] = []
+var object_title: Label
 var sections: Dictionary = {}
 var picker: ColorPicker
 var color_popup: PopupPanel
@@ -50,27 +56,55 @@ var attribute_type: OptionButton
 var attribute_error: Label
 var refreshing := false
 
-func _init(object: Node, filter_text := "") -> void:
+func _init(object: Object, filter_text := "", objects: Array[Node] = []) -> void:
 	name = "ROMEStudioProperties"
 	target = object
+	targets = objects.duplicate()
+	if targets.is_empty() and object is Node:
+		targets.append(object)
+	multi = targets.size() > 1
+	scene_origin = EditorInterface.get_edited_scene_root()
 	filter = filter_text.strip_edges()
 	var layout := VBoxContainer.new()
 	add_child(layout)
 	set_bottom_editor(layout)
+	var identity := HBoxContainer.new()
+	identity.name = "ROMEPropertyObjectHeader"
+	identity.add_theme_constant_override("separation", int(6 * EditorInterface.get_editor_scale()))
+	layout.add_child(identity)
+	var icon := TextureRect.new()
+	icon.texture = Catalog.icon_for(Catalog.class_name_of(targets[0]))
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.custom_minimum_size = Vector2(16, 20) * EditorInterface.get_editor_scale()
+	identity.add_child(icon)
+	var title := Label.new()
+	title.name = "ROMEPropertyObjectName"
+	title.text = _identity()
+	title.tooltip_text = title.text
+	title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	identity.add_child(title)
+	object_title = title
 	table = Tree.new()
 	table.name = "ROMEPropertyGrid"
 	table.columns = 2
 	table.hide_root = true
 	table.select_mode = Tree.SELECT_SINGLE
 	table.scroll_vertical_enabled = false
-	table.set_column_expand_ratio(0, 1)
-	table.set_column_expand_ratio(1, 1)
+	table.set_column_expand_ratio(0, 6)
+	table.set_column_expand_ratio(1, 5)
 	table.set_column_clip_content(0, true)
+	table.set_column_clip_content(1, true)
 	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Property names are API names: Studio keeps them in English.
 	table.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	table.add_theme_constant_override("v_separation", 4)
 	table.add_theme_constant_override("item_margin", int(10 * EditorInterface.get_editor_scale()))
+	# This is a property table, with nesting reserved for expandable components.
+	table.add_theme_constant_override("draw_guides", 0)
+	table.add_theme_constant_override("draw_relationship_lines", 0)
 	layout.add_child(table)
 	add_button = Button.new()
 	add_button.name = "ROMEAddAttribute"
@@ -79,12 +113,13 @@ func _init(object: Node, filter_text := "") -> void:
 	add_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	add_button.pressed.connect(_prompt_attribute)
 	layout.add_child(add_button)
-	var properties := panel_properties(target)
+	var properties := panel_properties(target, targets[0])
 	shown["name"] = true
 	for property: String in properties:
 		shown[property] = true
-	for key in attribute_names(target):
-		shown["metadata/" + key] = true
+	if not multi:
+		for key in attribute_names(targets[0]):
+			shown["metadata/" + key] = true
 	refreshing = true
 	_build(properties)
 	refreshing = false
@@ -94,11 +129,11 @@ func _init(object: Node, filter_text := "") -> void:
 	table.item_collapsed.connect(_section_folded)
 
 ## Properties edited by this grid; the plugin hides their default editors.
-static func panel_properties(object: Object) -> Dictionary:
+static func panel_properties(object: Object, representative: Node = null) -> Dictionary:
 	var result := {}
 	for info in object.get_property_list():
 		var property: String = info.name
-		var studio_name: bool = property == "name" or (property in ["position", "rotation"] and object is Node3D)
+		var studio_name: bool = property == "name" or (property in ["position", "rotation"] and (object is Node3D or representative is Node3D))
 		if info.usage & (PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP):
 			continue
 		if not studio_name and (property.is_empty() or property[0] == "_" or property[0] != property[0].to_upper() or property.contains("/") or not info.usage & PROPERTY_USAGE_EDITOR):
@@ -124,9 +159,19 @@ static func attribute_names(object: Node) -> PackedStringArray:
 	return names
 
 func commit(property: String, value: Variant) -> void:
+	if multi and not _can_commit_multi():
+		return
 	emit_changed(property, value)
 
+func _can_commit_multi() -> bool:
+	return scene_origin == EditorInterface.get_edited_scene_root() and targets.all(func(node: Node) -> bool: return is_instance_valid(node) and node.is_inside_tree())
+
+func _identity() -> String:
+	return str(targets.size()) + " objetos seleccionados" if multi else '%s "%s"' % [Catalog.class_name_of(targets[0]), targets[0].name]
+
 func add_attribute(key: String, type_name: String) -> String:
+	if multi:
+		return "Selecciona un solo objeto para agregar atributos."
 	var clean := key.strip_edges()
 	if clean.is_empty():
 		return "Escribe un nombre para el atributo."
@@ -151,6 +196,8 @@ func add_attribute(key: String, type_name: String) -> String:
 	return ""
 
 func remove_attribute(key: String) -> void:
+	if multi:
+		return
 	if not target.has_meta(key):
 		return
 	var undo := EditorInterface.get_editor_undo_redo()
@@ -180,9 +227,12 @@ func _build(properties: Dictionary) -> void:
 	var tree_root := table.create_item()
 	var data := _section(tree_root, "Datos")
 	_row(data, "name", properties.get("name", {"type": TYPE_STRING_NAME}))
-	_fixed(data, "ClassName", Catalog.class_name_of(target))
-	var parent := target.get_parent()
-	_fixed(data, "Parent", str(parent.name) if parent != null and target != EditorInterface.get_edited_scene_root() else "")
+	var first := targets[0]
+	var same_class := targets.all(func(node: Node) -> bool: return Catalog.class_name_of(node) == Catalog.class_name_of(first))
+	_fixed(data, "ClassName", Catalog.class_name_of(first) if same_class else "—")
+	var parent := first.get_parent()
+	var same_parent := targets.all(func(node: Node) -> bool: return node.get_parent() == parent)
+	_fixed(data, "Parent", (str(parent.name) if parent != null and first != EditorInterface.get_edited_scene_root() else "") if same_parent else "—")
 	var placed := {"name": true}
 	for group: Array in SECTIONS:
 		var section: TreeItem
@@ -196,8 +246,12 @@ func _build(properties: Dictionary) -> void:
 	for property: String in properties:
 		if not placed.has(property):
 			if rest == null:
-				rest = _section(tree_root, Catalog.class_name_of(target))
+				rest = _section(tree_root, Catalog.class_name_of(first) if same_class else "Propiedades comunes")
 			_row(rest, property, properties[property])
+	if multi:
+		_apply_filter()
+		_update_property()
+		return
 	var attributes := _section(tree_root, "Atributos")
 	var remove_icon := EditorInterface.get_editor_theme().get_icon("Remove", "EditorIcons")
 	for key in attribute_names(target):
@@ -250,6 +304,9 @@ func _row(parent: TreeItem, property: String, info: Dictionary) -> TreeItem:
 			names.append(pieces[0].strip_edges())
 			values.append(next)
 			next += 1
+		if multi:
+			names.insert(0, "—")
+			values.insert(0, null) # Choosing the mixed marker must not change any object.
 		row.set_cell_mode(1, TreeItem.CELL_MODE_RANGE)
 		row.set_text(1, ",".join(names))
 		row.set_range_config(1, 0, maxi(names.size() - 1, 0), 1)
@@ -258,6 +315,39 @@ func _row(parent: TreeItem, property: String, info: Dictionary) -> TreeItem:
 		meta["range"] = str(info.hint_string)
 	row.set_metadata(0, meta)
 	rows[property] = row
+	if type in [TYPE_VECTOR2, TYPE_VECTOR3, TYPE_VECTOR4]:
+		_add_components(row, property, type, bool(info.get("read_only", false)))
+	return row
+
+## Whole vectors and individual components edit the same property, so Undo and
+## live changes from gizmos remain consistent. Vector4 is GodotLuau's UDim2.
+func _add_components(row: TreeItem, property: String, type: int, read_only: bool) -> void:
+	var key := property + ":" + str(type)
+	var meta: Dictionary = row.get_metadata(0)
+	meta["fold_key"] = key
+	row.set_metadata(0, meta)
+	row.collapsed = bool(property_folded.get(key, true))
+	if type == TYPE_VECTOR4:
+		for axis in 2:
+			var label := "X" if axis == 0 else "Y"
+			var group := _component(row, property, label, TYPE_VECTOR2, [axis * 2, axis * 2 + 1], read_only)
+			var group_meta: Dictionary = group.get_metadata(0)
+			group_meta["fold_key"] = key + "/" + label
+			group.set_metadata(0, group_meta)
+			group.collapsed = bool(property_folded.get(group_meta.fold_key, false))
+			_component(group, property, "Scale", TYPE_FLOAT, [axis * 2], read_only)
+			_component(group, property, "Offset", TYPE_FLOAT, [axis * 2 + 1], read_only)
+	else:
+		for index in (2 if type == TYPE_VECTOR2 else 3):
+			_component(row, property, ["X", "Y", "Z"][index], TYPE_FLOAT, [index], read_only)
+
+func _component(parent: TreeItem, property: String, label: String, type: int, indices: Array, read_only: bool) -> TreeItem:
+	var row := table.create_item(parent)
+	row.set_text(0, label)
+	row.set_tooltip_text(0, property + "." + label)
+	row.set_editable(1, not read_only and not (multi and indices.size() > 1))
+	row.set_metadata(0, {"property": property, "type": type, "indices": indices})
+	component_rows.append(row)
 	return row
 
 func _fixed(parent: TreeItem, title: String, text: String) -> TreeItem:
@@ -265,11 +355,12 @@ func _fixed(parent: TreeItem, title: String, text: String) -> TreeItem:
 	row.set_text(0, title)
 	row.set_tooltip_text(0, title)
 	row.set_text(1, text)
+	row.set_tooltip_text(1, text)
 	row.set_custom_color(1, Color("a3a6b0"))
 	return row
 
 func _apply_filter() -> void:
-	add_button.visible = filter.is_empty() or "Atributos".containsn(filter)
+	add_button.visible = not multi and (filter.is_empty() or "Atributos".containsn(filter))
 	if filter.is_empty():
 		return
 	for title: String in sections:
@@ -277,13 +368,27 @@ func _apply_filter() -> void:
 		var whole := title.containsn(filter)
 		var any := false
 		for row in section.get_children():
-			row.visible = whole or row.get_text(0).containsn(filter) or row.get_tooltip_text(0).containsn(filter)
+			row.visible = _filter_row(row, whole)
 			any = any or row.visible
 		section.visible = any or whole
+
+func _filter_row(row: TreeItem, inherited: bool) -> bool:
+	var matches := inherited or row.get_text(0).containsn(filter) or row.get_tooltip_text(0).containsn(filter)
+	var child_matches := false
+	for child in row.get_children():
+		child.visible = _filter_row(child, matches)
+		child_matches = child_matches or child.visible
+	if child_matches:
+		row.collapsed = false
+	return matches or child_matches
 
 func _update_property() -> void:
 	if table == null or not is_instance_valid(target):
 		return
+	if multi and not _can_commit_multi():
+		return
+	object_title.text = _identity()
+	object_title.tooltip_text = object_title.text
 	for editor in table.find_children("*", "LineEdit", true, false):
 		if editor.is_visible_in_tree() and editor.has_focus():
 			return
@@ -292,24 +397,55 @@ func _update_property() -> void:
 		var row: TreeItem = rows[property]
 		var meta: Dictionary = row.get_metadata(0)
 		var value: Variant = _value(property)
+		var mixed := _mixed(property)
+		row.set_tooltip_text(1, "Valores diferentes: editar aplica el nuevo valor a todos los objetos." if mixed else _format(value, property))
 		match int(meta.type):
 			TYPE_BOOL:
-				row.set_checked(1, bool(value))
+				row.set_checked(1, false if mixed else bool(value))
+				row.set_indeterminate(1, mixed)
 			TYPE_COLOR:
 				var color: Color = value if value is Color else Color.BLACK
-				row.set_icon(1, _swatch(color))
-				row.set_text(1, "[%d, %d, %d]" % [color.r8, color.g8, color.b8])
+				row.set_icon(1, null if mixed else _swatch(color))
+				row.set_text(1, "—" if mixed else "[%d, %d, %d]" % [color.r8, color.g8, color.b8])
 			_:
 				if meta.has("values"):
-					row.set_range(1, maxi(meta.values.find(int(value)), 0))
+					row.set_range(1, 0 if mixed else maxi(meta.values.find(int(value)), 0))
 				else:
-					row.set_text(1, _format(value, property))
+					row.set_text(1, "—" if mixed else _format(value, property))
+	for row in component_rows:
+		var meta: Dictionary = row.get_metadata(0)
+		var value: Variant = _value(meta.property)
+		if meta.property == "rotation":
+			value *= 180.0 / PI
+		var component: Variant = value[meta.indices[0]]
+		if meta.indices.size() == 2:
+			component = Vector2(component, value[meta.indices[1]])
+		var mixed := _mixed(meta.property, meta.indices)
+		row.set_text(1, "—" if mixed else _format(component, ""))
+		row.set_tooltip_text(1, "Valores diferentes: solo se cambia este componente en cada objeto." if mixed else _format(component, ""))
 	refreshing = false
 
 func _value(property: String) -> Variant:
 	if property.begins_with("metadata/"):
-		return target.get_meta(property.trim_prefix("metadata/"), null)
+		return targets[0].get_meta(property.trim_prefix("metadata/"), null)
 	return target.get(property)
+
+func _mixed(property: String, indices: Array = []) -> bool:
+	if not multi:
+		return false
+	var first: Variant = targets[0].get(property)
+	for node in targets:
+		if not is_instance_valid(node):
+			return true
+		var value: Variant = node.get(property)
+		if indices.is_empty():
+			if value != first:
+				return true
+		else:
+			for index in indices:
+				if value[index] != first[index]:
+					return true
+	return false
 
 static func _format(value: Variant, property: String) -> String:
 	match typeof(value):
@@ -354,7 +490,22 @@ func _edited() -> void:
 	if value == null:
 		call_deferred("_update_property")
 		return
+	if meta.has("indices"):
+		_commit_components(meta, value)
+		return
 	commit(meta.property, value)
+
+func _commit_components(meta: Dictionary, value: Variant) -> void:
+	if multi and (not _can_commit_multi() or meta.indices.size() != 1):
+		return
+	var vector: Variant = _value(meta.property)
+	for i in meta.indices.size():
+		var number: float = value if meta.indices.size() == 1 else value[i]
+		vector[meta.indices[i]] = deg_to_rad(number) if meta.property == "rotation" else number
+	if multi:
+		emit_changed(meta.property, vector, ["x", "y", "z", "w"][meta.indices[0]])
+	else:
+		commit(meta.property, vector)
 
 func _parse(row: TreeItem, meta: Dictionary) -> Variant:
 	var text := row.get_text(1).strip_edges()
@@ -364,14 +515,14 @@ func _parse(row: TreeItem, meta: Dictionary) -> Variant:
 		TYPE_INT:
 			if meta.has("values"):
 				return meta.values[clampi(int(row.get_range(1)), 0, meta.values.size() - 1)]
-			return int(_clamp(roundf(text.to_float()), meta)) if text.is_valid_float() else null
+			return int(_clamp(roundf(text.to_float()), meta)) if _valid_number(text) else null
 		TYPE_FLOAT:
-			return _clamp(text.to_float(), meta) if text.is_valid_float() else null
+			return _clamp(text.to_float(), meta) if _valid_number(text) else null
 		TYPE_STRING, TYPE_STRING_NAME:
 			return null if meta.property == "name" and text.is_empty() else row.get_text(1)
 	var numbers := PackedFloat64Array()
 	for piece in text.replace("{", "").replace("}", "").replace("[", "").replace("]", "").replace("(", "").replace(")", "").split(","):
-		if not piece.strip_edges().is_valid_float():
+		if not _valid_number(piece.strip_edges()):
 			return null
 		numbers.append(piece.strip_edges().to_float())
 	match int(meta.type):
@@ -387,6 +538,15 @@ func _parse(row: TreeItem, meta: Dictionary) -> Variant:
 		TYPE_RECT2:
 			return Rect2(numbers[0], numbers[1], numbers[2], numbers[3]) if numbers.size() == 4 else null
 	return null
+
+static func _valid_number(text: String) -> bool:
+	if not text.is_valid_float():
+		return false
+	# Reject oversized exponents before to_float(), which otherwise logs a warning.
+	var scientific := text.to_lower().split("e")
+	if scientific.size() == 2 and absi(scientific[1].to_int()) > 308:
+		return false
+	return is_finite(text.to_float())
 
 static func _clamp(value: float, meta: Dictionary) -> float:
 	var hint := str(meta.get("range", "")).replace(" ", "").split(",")
@@ -417,6 +577,10 @@ func _button_clicked(item: TreeItem, _column: int, id: int, _mouse_button: int) 
 func _section_folded(item: TreeItem) -> void:
 	if not refreshing and filter.is_empty() and sections.get(item.get_text(0)) == item:
 		folded[item.get_text(0)] = item.collapsed
+	elif not refreshing and filter.is_empty() and item.get_metadata(0) is Dictionary:
+		var meta: Dictionary = item.get_metadata(0)
+		if meta.has("fold_key"):
+			property_folded[meta.fold_key] = item.collapsed
 	table.update_minimum_size()
 
 func _prompt_attribute() -> void:

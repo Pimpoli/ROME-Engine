@@ -154,6 +154,7 @@ public:
 	void update(Object *p_object);
 	Container *get_addon_area();
 	EditorInspector *get_inspector() { return inspector; }
+	void focus_property_filter();
 
 	EditorPropertyNameProcessor::Style get_property_name_style() const;
 

@@ -80,8 +80,7 @@ void EditorSceneTabs::_rome_update_documents() {
 }
 
 void EditorSceneTabs::_rome_show_scene() {
-	Node *root = EditorNode::get_editor_data().get_edited_scene_root();
-	EditorInterface::get_singleton()->set_main_screen_editor(root && (Object::cast_to<Node2D>(root) || Object::cast_to<Control>(root)) ? "2D" : "3D");
+	EditorInterface::get_singleton()->set_main_screen_editor(EditorNode::get_singleton()->rome_get_scene_view());
 	_rome_update_documents();
 }
 

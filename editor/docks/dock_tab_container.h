@@ -34,6 +34,7 @@
 #include "scene/gui/tab_container.h"
 
 class ConfigFile;
+class Button;
 class DockContextPopup;
 class DockTabContainer;
 class EditorDockManager;
@@ -77,12 +78,16 @@ class DockTabContainer : public TabContainer {
 	GDCLASS(DockTabContainer, TabContainer);
 
 	EditorDockDragHint *drag_hint = nullptr;
+	Button *rome_float_button = nullptr;
+	Button *rome_close_button = nullptr;
 
 	HashMap<int, int> valid_drop_margins;
 
 	void _pre_popup(const Size2i &p_size);
 	void _tab_rmb_clicked(int p_tab_idx);
 	void _tab_clicked();
+	void _rome_update_header_actions();
+	void _rome_header_action(bool p_float);
 
 protected:
 	DockContextPopup *dock_context_popup = nullptr;

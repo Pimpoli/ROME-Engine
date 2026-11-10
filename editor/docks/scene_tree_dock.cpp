@@ -39,6 +39,7 @@
 #include "core/os/keyboard.h"
 #include "editor/animation/animation_player_editor_plugin.h"
 #include "editor/debugger/editor_debugger_node.h"
+#include "editor/docks/editor_dock_manager.h"
 #include "editor/docks/filesystem_dock.h"
 #include "editor/docks/groups_dock.h"
 #include "editor/docks/inspector_dock.h"
@@ -195,6 +196,37 @@ void SceneTreeDock::shortcut_input(const Ref<InputEvent> &p_event) {
 	if (!p_event->is_pressed()) {
 		return;
 	}
+	Tree *explorer_tree = scene_tree->get_scene_tree();
+	if (focus_owner == explorer_tree && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && ED_IS_SHORTCUT("rome/explorer_select_all", p_event)) {
+		Vector<Node *> nodes;
+		Vector<TreeItem *> pending;
+		if (TreeItem *root = explorer_tree->get_root()) {
+			pending.push_back(root);
+		}
+		while (!pending.is_empty()) {
+			TreeItem *item = pending[pending.size() - 1];
+			pending.remove_at(pending.size() - 1);
+			// Folded branches still participate in Select All. Filtering is carried
+			// by each item's visible/selectable flags, not its collapsed ancestors.
+			for (TreeItem *child = item->get_last_child(); child; child = child->get_prev()) {
+				pending.push_back(child);
+			}
+			if (!item->is_visible() || !item->is_selectable(0) || (item == explorer_tree->get_root() && explorer_tree->is_root_hidden())) {
+				continue;
+			}
+			const Variant metadata = item->get_metadata(0);
+			if (edited_scene && metadata.get_type() == Variant::NODE_PATH) {
+				const NodePath path = metadata;
+				Node *node = edited_scene->get_node_or_null(path);
+				if (node) {
+					nodes.push_back(node);
+				}
+			}
+		}
+		set_selection(nodes);
+		accept_event();
+		return;
+	}
 
 	// These shortcuts allow echo events for continuous execution.
 	if (ED_IS_SHORTCUT("scene_tree/duplicate", p_event)) {
@@ -204,9 +236,9 @@ void SceneTreeDock::shortcut_input(const Ref<InputEvent> &p_event) {
 	} else if (ED_IS_SHORTCUT("scene_tree/move_down", p_event)) {
 		_tool_selected(TOOL_MOVE_DOWN);
 	} else if (ED_IS_SHORTCUT("scene_tree/paste_node", p_event)) {
-		_tool_selected(TOOL_PASTE);
+		_tool_selected(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? TOOL_ROME_PASTE_WORKSPACE : TOOL_PASTE);
 	} else if (ED_IS_SHORTCUT("scene_tree/paste_node_as_sibling", p_event)) {
-		_tool_selected(TOOL_PASTE_AS_SIBLING);
+		_tool_selected(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? TOOL_PASTE : TOOL_PASTE_AS_SIBLING);
 	}
 
 	if (p_event->is_echo()) {
@@ -226,6 +258,9 @@ void SceneTreeDock::shortcut_input(const Ref<InputEvent> &p_event) {
 	} else if (ED_IS_SHORTCUT("scene_tree/batch_rename", p_event)) {
 		_tool_selected(TOOL_BATCH_RENAME);
 	} else if (ED_IS_SHORTCUT("scene_tree/add_child_node", p_event)) {
+		if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+			return; // Ctrl+A belongs to Explorer selection; ROME inserts with Ctrl+I.
+		}
 		_tool_selected(TOOL_NEW);
 	} else if (ED_IS_SHORTCUT("scene_tree/instantiate_scene", p_event)) {
 		_tool_selected(TOOL_INSTANTIATE);
@@ -652,10 +687,133 @@ bool SceneTreeDock::_track_inherit(const String &p_target_scene_path, Node *p_de
 	return result;
 }
 
+bool SceneTreeDock::_rome_can_group_selection(bool p_ungroup) const {
+	if (!profile_allow_editing || !edited_scene || !bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		return false;
+	}
+	const List<Node *> selected = editor_selection->get_full_selected_node_list();
+	if (selected.is_empty()) {
+		return false;
+	}
+	const char *services[] = { "RobloxWorkspace", "RobloxWorkspace2D", "Players", "Lighting", "MaterialService", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "Teams", "SoundService", "TextChatService", "RunService", "StarterPlayerScripts", "StarterCharacterScripts" };
+	const char *service_names[] = { "Workspace", "Players", "Lighting", "MaterialService", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "Teams", "SoundService", "TextChatService", "RunService" };
+	for (Node *node : selected) {
+		if (node == edited_scene || node->get_owner() != edited_scene || !edited_scene->is_ancestor_of(node)) {
+			return false;
+		}
+		if (edited_scene->get_scene_inherited_state().is_valid() && edited_scene->get_scene_inherited_state()->find_node_by_path(edited_scene->get_path_to(node)) >= 0) {
+			return false;
+		}
+		for (const char *service : services) {
+			if (node->is_class(service)) {
+				return false;
+			}
+		}
+		if ((edited_scene->is_class("RobloxGame3D") || edited_scene->is_class("RobloxGame2D")) && node->get_parent() == edited_scene) {
+			for (const char *service : service_names) {
+				if (node->get_name() == StringName(service)) {
+					return false;
+				}
+			}
+		}
+		if (p_ungroup && ((!node->is_class("RBXModel") && !node->is_class("Folder") && !bool(node->get_meta("rome_2d_group", false))) || node->is_instance())) {
+			return false;
+		}
+	}
+	return true;
+}
+
+Vector<Node *> SceneTreeDock::_rome_hierarchy_targets(bool p_parents) const {
+	Vector<Node *> targets;
+	if (!edited_scene) {
+		return targets;
+	}
+	HashSet<Node *> seen;
+	const List<Node *> selected = editor_selection->get_full_selected_node_list();
+	for (Node *node : selected) {
+		const int count = p_parents ? 1 : node->get_child_count();
+		for (int i = 0; i < count; i++) {
+			Node *candidate = p_parents ? node->get_parent() : node->get_child(i);
+			if (!candidate || seen.has(candidate)) {
+				continue;
+			}
+			if (candidate == edited_scene) {
+				if (edited_scene->is_class("RobloxGame3D") || edited_scene->is_class("RobloxGame2D")) {
+					continue; // This data-model root is hidden in the Explorer.
+				}
+			} else if (candidate->get_owner() != edited_scene || !edited_scene->is_ancestor_of(candidate)) {
+				continue;
+			}
+			TreeItem *item = scene_tree->get_node_item(candidate);
+			if (!item || !item->is_selectable(0)) {
+				continue;
+			}
+			seen.insert(candidate);
+			targets.push_back(candidate);
+		}
+	}
+	return targets;
+}
+
+bool SceneTreeDock::_rome_fixed_container(Node *p_node) const {
+	if (!p_node || !edited_scene) {
+		return false;
+	}
+	if (p_node == edited_scene && (p_node->is_class("RobloxGame3D") || p_node->is_class("RobloxGame2D"))) {
+		return true;
+	}
+	for (const char *type : { "RobloxWorkspace", "RobloxWorkspace2D", "Players", "Lighting", "MaterialService", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "Teams", "SoundService", "TextChatService", "RunService", "StarterPlayerScripts", "StarterCharacterScripts" }) {
+		if (p_node->is_class(type)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		if (p_tool == TOOL_MAKE_ROOT && edited_scene && (edited_scene->is_class("RobloxGame3D") || edited_scene->is_class("RobloxGame2D"))) {
+			return;
+		}
+		if (p_tool == TOOL_CUT || p_tool == TOOL_COPY || p_tool == TOOL_DUPLICATE || p_tool == TOOL_RENAME || p_tool == TOOL_BATCH_RENAME || p_tool == TOOL_CHANGE_TYPE) {
+			for (Node *node : editor_selection->get_full_selected_node_list()) {
+				if (_rome_fixed_container(node)) {
+					return;
+				}
+			}
+		}
+	}
 	current_option = p_tool;
 
 	switch (p_tool) {
+		case TOOL_ROME_OPEN_SCRIPT: {
+			rome_open_selected_script();
+		} break;
+		case TOOL_ROME_PASTE_WORKSPACE: {
+			if (profile_allow_editing && edited_scene && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+				Node *destination = edited_scene->get_node_or_null(NodePath("Workspace"));
+				paste_nodes(false, destination ? destination : edited_scene);
+			}
+		} break;
+		case TOOL_ROME_GROUP_MODEL:
+		case TOOL_ROME_GROUP_FOLDER:
+		case TOOL_ROME_UNGROUP: {
+			if (!_rome_can_group_selection(p_tool == TOOL_ROME_UNGROUP)) {
+				break;
+			}
+			const char *action = p_tool == TOOL_ROME_GROUP_MODEL ? "group" : (p_tool == TOOL_ROME_GROUP_FOLDER ? "group_folder" : "ungroup");
+			EditorNode::get_singleton()->emit_signal("rome_editor_action", action, Variant());
+		} break;
+		case TOOL_ROME_SELECT_CHILDREN:
+		case TOOL_ROME_SELECT_PARENTS: {
+			if (!profile_allow_editing || !bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+				break;
+			}
+			const Vector<Node *> targets = _rome_hierarchy_targets(p_tool == TOOL_ROME_SELECT_PARENTS);
+			if (!targets.is_empty()) {
+				set_selection(targets);
+			}
+		} break;
 		case TOOL_BATCH_RENAME: {
 			if (!profile_allow_editing) {
 				break;
@@ -2519,7 +2677,7 @@ void SceneTreeDock::_do_reparent(Node *p_new_parent, int p_position_in_parent, V
 	if (ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) {
 		// Services have fixed homes. Reject the edit before the extension can discard
 		// a service that entered an invalid parent, preserving its user-authored data.
-		const char *services[] = { "RobloxWorkspace", "Players", "Lighting", "MaterialService", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "Teams", "SoundService", "TextChatService", "RunService", "StarterPlayerScripts", "StarterCharacterScripts" };
+		const char *services[] = { "RobloxWorkspace", "RobloxWorkspace2D", "Players", "Lighting", "MaterialService", "ReplicatedFirst", "ReplicatedStorage", "ServerScriptService", "ServerStorage", "StarterGui", "StarterPack", "StarterPlayer", "Teams", "SoundService", "TextChatService", "RunService", "StarterPlayerScripts", "StarterCharacterScripts" };
 		for (Node *node : p_nodes) {
 			for (const char *service : services) {
 				if (node->is_class(service)) {
@@ -4098,6 +4256,79 @@ void SceneTreeDock::_add_children_to_popup(Object *p_obj, int p_depth) {
 	}
 }
 
+void SceneTreeDock::_rome_popup_context(const Vector2 &p_position) {
+	if (!menu_rome_context) {
+		menu->reset_size();
+		menu->set_position(p_position);
+		menu->popup();
+		return;
+	}
+	menu_rome_context->clear(false);
+	const int native_paste = menu->get_item_index(TOOL_PASTE);
+	if (native_paste >= 0) {
+		menu->set_item_text(native_paste, "Pegar dentro");
+		menu->set_item_shortcut(native_paste, ED_GET_SHORTCUT("scene_tree/paste_node_as_sibling"));
+	}
+	const int native_sibling = menu->get_item_index(TOOL_PASTE_AS_SIBLING);
+	if (native_sibling >= 0) {
+		menu->set_item_shortcut(native_sibling, Ref<Shortcut>());
+	}
+	bool fixed = false;
+	for (Node *node : editor_selection->get_full_selected_node_list()) {
+		fixed = fixed || _rome_fixed_container(node);
+	}
+	for (int id : { TOOL_CUT, TOOL_COPY, TOOL_DUPLICATE, TOOL_RENAME, TOOL_BATCH_RENAME, TOOL_CHANGE_TYPE, TOOL_REPARENT, TOOL_REPARENT_TO_NEW_NODE }) {
+		const int index = menu->get_item_index(id);
+		if (fixed && index >= 0) {
+			menu->set_item_disabled(index, true);
+		}
+	}
+	auto common = [this](int p_id, const String &p_label, const Ref<Shortcut> &p_shortcut = Ref<Shortcut>()) {
+		const int index = menu->get_item_index(p_id);
+		if (index < 0) {
+			return;
+		}
+		menu_rome_context->add_icon_item(menu->get_item_icon(index), p_label, p_id);
+		menu_rome_context->set_item_shortcut(-1, p_shortcut.is_valid() ? p_shortcut : menu->get_item_shortcut(index));
+		menu_rome_context->set_item_disabled(-1, menu->is_item_disabled(index));
+	};
+	Node *selected = scene_tree->get_selected();
+	if (editor_selection->get_selection().size() == 1 && selected && selected->has_method("get_codigo_luau")) {
+		menu_rome_context->add_icon_item(get_editor_theme_icon(SNAME("Script")), "Abrir script", TOOL_ROME_OPEN_SCRIPT);
+		menu_rome_context->add_separator();
+	}
+	common(TOOL_NEW, "Insertar objeto...");
+	common(TOOL_INSTANTIATE, "Insertar escena...");
+	if (profile_allow_editing) {
+		menu_rome_context->add_separator();
+		common(TOOL_CUT, "Cortar");
+		common(TOOL_COPY, "Copiar");
+		menu_rome_context->add_icon_item(get_editor_theme_icon(SNAME("ActionPaste")), "Pegar", TOOL_ROME_PASTE_WORKSPACE);
+		menu_rome_context->set_item_shortcut(-1, ED_GET_SHORTCUT("scene_tree/paste_node"));
+		menu_rome_context->set_item_disabled(-1, node_clipboard.is_empty());
+		menu_rome_context->add_icon_item(get_editor_theme_icon(SNAME("ActionPaste")), "Pegar dentro", TOOL_PASTE);
+		menu_rome_context->set_item_shortcut(-1, ED_GET_SHORTCUT("scene_tree/paste_node_as_sibling"));
+		menu_rome_context->set_item_disabled(-1, node_clipboard.is_empty() || editor_selection->get_selection().is_empty());
+		common(TOOL_DUPLICATE, "Duplicar");
+		common(TOOL_ERASE, "Eliminar");
+		common(TOOL_RENAME, "Renombrar");
+		menu_rome_context->add_separator();
+		common(TOOL_ROME_GROUP_MODEL, "Agrupar como modelo");
+		common(TOOL_ROME_GROUP_FOLDER, "Agrupar como carpeta");
+		common(TOOL_ROME_UNGROUP, "Desagrupar");
+		for (int i = 0; i < menu_rome_quick_hierarchy->get_item_count(); i++) {
+			const int id = menu_rome_quick_hierarchy->get_item_id(i);
+			menu_rome_quick_hierarchy->set_item_disabled(i, _rome_hierarchy_targets(id == TOOL_ROME_SELECT_PARENTS).is_empty());
+		}
+		menu_rome_context->add_submenu_node_item(String::utf8("Jerarquía"), menu_rome_quick_hierarchy);
+	}
+	menu_rome_context->add_separator();
+	menu_rome_context->add_submenu_node_item("Avanzado", menu);
+	menu_rome_context->reset_size();
+	menu_rome_context->set_position(p_position);
+	menu_rome_context->popup();
+}
+
 void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 	ERR_FAIL_COND(!EditorNode::get_singleton()->get_edited_scene());
 	menu->clear(false);
@@ -4112,7 +4343,7 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 			return;
 		}
 
-		menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Add")), ED_GET_SHORTCUT("scene_tree/add_child_node"), TOOL_NEW);
+		menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Add")), ED_GET_SHORTCUT(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? "rome/insert_object" : "scene_tree/add_child_node"), TOOL_NEW);
 		menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Instance")), ED_GET_SHORTCUT("scene_tree/instantiate_scene"), TOOL_INSTANTIATE);
 
 		if (EditorContextMenuPluginManager::get_singleton()->has_plugins_for_slot(EditorContextMenuPlugin::CONTEXT_SLOT_SCENE_TREE)) {
@@ -4122,9 +4353,7 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 #endif
 		}
 
-		menu->reset_size();
-		menu->set_position(p_menu_pos);
-		menu->popup();
+		_rome_popup_context(p_menu_pos);
 		return;
 	}
 
@@ -4167,7 +4396,19 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 				}
 			}
 
-			menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Add")), ED_GET_SHORTCUT("scene_tree/add_child_node"), TOOL_NEW);
+			if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+				menu->add_icon_shortcut(get_editor_theme_icon(SNAME("StudioGroup")), ED_GET_SHORTCUT("rome/group"), TOOL_ROME_GROUP_MODEL);
+				menu->set_item_disabled(menu->get_item_index(TOOL_ROME_GROUP_MODEL), !_rome_can_group_selection());
+				menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Folder")), ED_GET_SHORTCUT("rome/group_folder"), TOOL_ROME_GROUP_FOLDER);
+				menu->set_item_disabled(menu->get_item_index(TOOL_ROME_GROUP_FOLDER), !_rome_can_group_selection());
+				menu->add_shortcut(ED_GET_SHORTCUT("rome/ungroup"), TOOL_ROME_UNGROUP);
+				menu->set_item_disabled(menu->get_item_index(TOOL_ROME_UNGROUP), !_rome_can_group_selection(true));
+				menu_rome_hierarchy->set_item_disabled(menu_rome_hierarchy->get_item_index(TOOL_ROME_SELECT_CHILDREN), _rome_hierarchy_targets(false).is_empty());
+				menu_rome_hierarchy->set_item_disabled(menu_rome_hierarchy->get_item_index(TOOL_ROME_SELECT_PARENTS), _rome_hierarchy_targets(true).is_empty());
+				menu->add_submenu_node_item(String::utf8("Jerarquía"), menu_rome_hierarchy);
+				menu->add_separator();
+			}
+			menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Add")), ED_GET_SHORTCUT(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? "rome/insert_object" : "scene_tree/add_child_node"), TOOL_NEW);
 			menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Instance")), ED_GET_SHORTCUT("scene_tree/instantiate_scene"), TOOL_INSTANTIATE);
 		}
 		menu->add_icon_shortcut(get_editor_theme_icon(SNAME("Collapse")), ED_GET_SHORTCUT("scene_tree/expand_collapse_all"), TOOL_EXPAND_COLLAPSE);
@@ -4444,9 +4685,7 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 #endif
 	}
 
-	menu->reset_size();
-	menu->set_position(p_menu_pos);
-	menu->popup();
+	_rome_popup_context(p_menu_pos);
 }
 
 void SceneTreeDock::_setup_tree_menu() {
@@ -4457,7 +4696,9 @@ void SceneTreeDock::_setup_tree_menu() {
 	tree_menu->add_check_item(TTRC("Center Node on Reparent"), TOOL_CENTER_PARENT);
 	tree_menu->set_item_tooltip(-1, TTRC("If enabled, Reparent to New Node will create the new node in the center of the selected nodes, if possible."));
 
-	tree_menu->add_check_item(TTRC("Hide Filtered Out Parents"), TOOL_HIDE_FILTERED_OUT_PARENTS);
+	if (!bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		tree_menu->add_check_item(TTRC("Hide Filtered Out Parents"), TOOL_HIDE_FILTERED_OUT_PARENTS);
+	}
 
 	tree_menu->add_separator();
 	tree_menu->add_check_item(TTRC("Show Accessibility Warnings"), TOOL_ACCESSIBILITY_WARNINGS);
@@ -4475,7 +4716,10 @@ void SceneTreeDock::_update_tree_menu() {
 	PopupMenu *tree_menu = button_tree_menu->get_popup();
 	tree_menu->set_item_checked(tree_menu->get_item_index(TOOL_AUTO_EXPAND), EDITOR_GET("docks/scene_tree/auto_expand_to_selected"));
 	tree_menu->set_item_checked(tree_menu->get_item_index(TOOL_CENTER_PARENT), EDITOR_GET("docks/scene_tree/center_node_on_reparent"));
-	tree_menu->set_item_checked(tree_menu->get_item_index(TOOL_HIDE_FILTERED_OUT_PARENTS), EDITOR_GET("docks/scene_tree/hide_filtered_out_parents"));
+	const int hide_parents_index = tree_menu->get_item_index(TOOL_HIDE_FILTERED_OUT_PARENTS);
+	if (hide_parents_index >= 0) {
+		tree_menu->set_item_checked(hide_parents_index, EDITOR_GET("docks/scene_tree/hide_filtered_out_parents"));
+	}
 	tree_menu->set_item_checked(tree_menu->get_item_index(TOOL_ACCESSIBILITY_WARNINGS), EDITOR_GET("docks/scene_tree/accessibility_warnings"));
 }
 
@@ -4552,6 +4796,12 @@ String SceneTreeDock::get_filter() {
 void SceneTreeDock::set_filter(const String &p_filter) {
 	filter->set_text(p_filter);
 	scene_tree->set_filter(p_filter);
+}
+
+void SceneTreeDock::focus_filter() {
+	EditorDockManager::get_singleton()->focus_dock(this);
+	filter->grab_focus();
+	filter->select_all();
 }
 
 void SceneTreeDock::save_branch_to_file(const String &p_directory) {
@@ -4684,7 +4934,7 @@ void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material
 	attach_shader_to_selected(p_preferred_mode);
 }
 
-List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling) {
+List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling, Node *p_forced_parent) {
 	List<Node *> pasted_nodes;
 
 	if (node_clipboard.is_empty()) {
@@ -4714,6 +4964,10 @@ List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling) {
 	const List<Node *> selection = editor_selection->get_top_selected_node_list();
 	if (selection.size() > 0) {
 		paste_parent = selection.back()->get();
+	}
+	if (p_forced_parent) {
+		ERR_FAIL_COND_V(p_forced_parent != edited_scene && !edited_scene->is_ancestor_of(p_forced_parent), pasted_nodes);
+		paste_parent = p_forced_parent;
 	}
 
 	if (p_paste_as_sibling) {
@@ -4756,51 +5010,66 @@ List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling) {
 		}
 	}
 
-	for (Node *node : node_clipboard) {
-		HashMap<const Node *, Node *> duplimap;
-
-		Node *dup = node->duplicate_from_editor(duplimap, edited_scene, resources_local_to_scenes);
-		ERR_CONTINUE(!dup);
-
-		pasted_nodes.push_back(dup);
-
-		if (!paste_parent) {
-			paste_parent = dup;
-			owner = dup;
-			dup->set_scene_file_path(String()); // Make sure the scene path is empty, to avoid accidental references.
-			ur->add_do_method(EditorNode::get_singleton(), "set_edited_scene", dup);
-		} else {
-			ur->add_do_method(paste_parent, "add_child", dup, true);
-			if (paste_sibling) {
-				ur->add_do_method(paste_parent, "move_child", dup, paste_sibling->get_index() + 1);
-			}
+	LocalVector<Node *> parents;
+	if (!p_forced_parent && !p_paste_as_sibling && selection.size() > 1 && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		for (Node *parent : selection) {
+			parents.push_back(parent);
 		}
+	} else {
+		parents.push_back(paste_parent);
+	}
+	for (Node *destination : parents) {
+		paste_parent = destination;
+		owner = paste_parent ? paste_parent->get_owner() : nullptr;
+		if (!owner) {
+			owner = paste_parent;
+		}
+		for (Node *node : node_clipboard) {
+			HashMap<const Node *, Node *> duplimap;
 
-		for (KeyValue<const Node *, Node *> &E2 : duplimap) {
-			Node *d = E2.value;
-			// When copying, all nodes that should have an owner assigned here were given nullptr as an owner
-			// and added to the node_clipboard_edited_scene_owned list.
-			if (d != dup && E2.key->get_owner() == nullptr) {
-				if (node_clipboard_edited_scene_owned.has(const_cast<Node *>(E2.key))) {
-					ur->add_do_method(d, "set_owner", owner);
+			Node *dup = node->duplicate_from_editor(duplimap, edited_scene, resources_local_to_scenes);
+			ERR_CONTINUE(!dup);
+
+			pasted_nodes.push_back(dup);
+
+			if (!paste_parent) {
+				paste_parent = dup;
+				owner = dup;
+				dup->set_scene_file_path(String()); // Make sure the scene path is empty, to avoid accidental references.
+				ur->add_do_method(EditorNode::get_singleton(), "set_edited_scene", dup);
+			} else {
+				ur->add_do_method(paste_parent, "add_child", dup, true);
+				if (paste_sibling) {
+					ur->add_do_method(paste_parent, "move_child", dup, paste_sibling->get_index() + 1);
 				}
 			}
-		}
 
-		if (dup != owner) {
-			ur->add_do_method(dup, "set_owner", edited_scene);
-		}
-		ur->add_do_method(editor_selection, "add_node", dup);
+			for (KeyValue<const Node *, Node *> &E2 : duplimap) {
+				Node *d = E2.value;
+				// When copying, all nodes that should have an owner assigned here were given nullptr as an owner
+				// and added to the node_clipboard_edited_scene_owned list.
+				if (d != dup && E2.key->get_owner() == nullptr) {
+					if (node_clipboard_edited_scene_owned.has(const_cast<Node *>(E2.key))) {
+						ur->add_do_method(d, "set_owner", owner);
+					}
+				}
+			}
 
-		if (dup == paste_parent) {
-			ur->add_undo_method(EditorNode::get_singleton(), "set_edited_scene", (Object *)nullptr);
-		} else {
-			ur->add_undo_method(paste_parent, "remove_child", dup);
-		}
-		ur->add_do_reference(dup);
+			if (dup != owner) {
+				ur->add_do_method(dup, "set_owner", edited_scene);
+			}
+			ur->add_do_method(editor_selection, "add_node", dup);
 
-		if (node_clipboard.size() == 1) {
-			ur->add_do_method(EditorNode::get_singleton(), "push_item", dup);
+			if (dup == paste_parent) {
+				ur->add_undo_method(EditorNode::get_singleton(), "set_edited_scene", (Object *)nullptr);
+			} else {
+				ur->add_undo_method(paste_parent, "remove_child", dup);
+			}
+			ur->add_do_reference(dup);
+
+			if (node_clipboard.size() == 1 && parents.size() == 1) {
+				ur->add_do_method(EditorNode::get_singleton(), "push_item", dup);
+			}
 		}
 	}
 
@@ -5286,6 +5555,7 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	ED_SHORTCUT_OVERRIDE("scene_tree/rename", "macos", Key::ENTER);
 
 	ED_SHORTCUT("scene_tree/batch_rename", TTRC("Batch Rename..."), KeyModifierMask::SHIFT | Key::F2);
+	ED_SHORTCUT("rome/explorer_select_all", "Seleccionar todos los resultados", KeyModifierMask::CMD_OR_CTRL | Key::A);
 	ED_SHORTCUT_OVERRIDE("scene_tree/batch_rename", "macos", KeyModifierMask::SHIFT | Key::ENTER);
 
 	ED_SHORTCUT("scene_tree/add_child_node", TTRC("Add Child Node..."), KeyModifierMask::CMD_OR_CTRL | Key::A);
@@ -5319,7 +5589,11 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	button_add->set_theme_type_variation("FlatMenuButton");
 	button_add->connect(SceneStringName(pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(TOOL_NEW, false));
 	button_add->set_tooltip_text(TTRC("Add/Create a New Node."));
-	button_add->set_shortcut(ED_GET_SHORTCUT("scene_tree/add_child_node"));
+	button_add->set_shortcut(ED_GET_SHORTCUT(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? "rome/insert_object" : "scene_tree/add_child_node"));
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		button_add->set_name("ROMEExplorerInsert");
+		button_add->set_tooltip_text("Insertar objeto (Ctrl+I)");
+	}
 	filter_hbc->add_child(button_add);
 
 	button_instance = memnew(Button);
@@ -5333,6 +5607,9 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 
 	// The "Filter Nodes" text input above the Scene Tree Editor.
 	filter = memnew(LineEdit);
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		filter->set_name("ROMEExplorerFilter");
+	}
 	filter->set_h_size_flags(SIZE_EXPAND_FILL);
 	filter->set_placeholder(TTRC("Search"));
 	filter->set_accessibility_name(TTRC("Filter Nodes"));
@@ -5511,8 +5788,29 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	new_scene_from_dialog->connect("file_selected", callable_mp(this, &SceneTreeDock::_new_scene_from));
 
 	menu = memnew(PopupMenu);
-	add_child(menu);
+	if (bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		menu->set_name("ROMEExplorerAdvanced");
+		menu_rome_context = memnew(PopupMenu);
+		menu_rome_context->set_name("ROMEExplorerContext");
+		add_child(menu_rome_context);
+		menu_rome_context->add_child(menu);
+		menu_rome_context->connect(SceneStringName(id_pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(false));
+		menu_rome_quick_hierarchy = memnew(PopupMenu);
+		menu_rome_quick_hierarchy->set_name("ROMEExplorerQuickHierarchy");
+		menu_rome_quick_hierarchy->add_item("Seleccionar hijos", TOOL_ROME_SELECT_CHILDREN);
+		menu_rome_quick_hierarchy->add_item("Seleccionar padres", TOOL_ROME_SELECT_PARENTS);
+		menu_rome_quick_hierarchy->connect(SceneStringName(id_pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(false));
+		menu_rome_context->add_child(menu_rome_quick_hierarchy);
+	} else {
+		add_child(menu);
+	}
 	menu->connect(SceneStringName(id_pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(false));
+	menu_rome_hierarchy = memnew(PopupMenu);
+	menu_rome_hierarchy->set_name("ROMEExplorerHierarchy");
+	menu_rome_hierarchy->add_item("Seleccionar hijos", TOOL_ROME_SELECT_CHILDREN);
+	menu_rome_hierarchy->add_item("Seleccionar padres", TOOL_ROME_SELECT_PARENTS);
+	menu_rome_hierarchy->connect(SceneStringName(id_pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(false));
+	menu->add_child(menu_rome_hierarchy);
 
 	menu_subresources = memnew(PopupMenu);
 	menu_subresources->connect(SceneStringName(id_pressed), callable_mp(this, &SceneTreeDock::_tool_selected).bind(false));

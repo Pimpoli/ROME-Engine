@@ -50,6 +50,7 @@
 #include "editor/script/script_editor_plugin.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
+#include "rome/vendor/GodotLuau/src/core/gl_herencia_gen.h"
 #include "scene/2d/node_2d.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/check_button.h"
@@ -60,6 +61,75 @@
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
 #include "scene/resources/packed_scene.h"
+
+namespace {
+
+// Public instance classes differ from their Godot implementation classes.
+// Keep the aliases aligned with ROMEStudio/studio_catalog.gd; shared
+// implementations use __rbx_class instead (Accessory, WedgePart, etc.).
+String rome_instance_class(const Node *p_node) {
+	if (p_node->has_meta(SNAME("__rbx_class"))) {
+		const Variant declared = p_node->get_meta(SNAME("__rbx_class"));
+		if ((declared.get_type() == Variant::STRING || declared.get_type() == Variant::STRING_NAME) && !String(declared).is_empty()) {
+			return declared;
+		}
+	}
+	static const char *const aliases[][2] = {
+		{ "RBXModel", "Model" }, { "RBXMeshPart", "MeshPart" },
+		{ "ServerScript", "Script" }, { "LightingSkyNode", "Sky" },
+		{ "AtmosphereNode", "Atmosphere" }, { "SunRaysNode", "SunRaysEffect" },
+		{ "RBXDecal", "Decal" }, { "RobloxDecal", "Decal" },
+		{ "RBXTexture", "Texture" }, { "RobloxTexture", "Texture" },
+		{ "RBXMesh", "SpecialMesh" }, { "RemoteEventNode", "RemoteEvent" },
+		{ "UnreliableRemoteEventNode", "UnreliableRemoteEvent" },
+		{ "RemoteFunctionNode", "RemoteFunction" }, { "BindableEventNode", "BindableEvent" },
+		{ "AnimationObject", "Animation" }, { "RBXBone", "Bone" },
+		{ "PlayerObject", "Player" }, { "RobloxPart", "Part" },
+		{ "RobloxWorkspace2D", "Workspace" },
+		{ "RobloxGame3D", "DataModel" }, { "RobloxGame2D", "DataModel" },
+	};
+	const String native_class = p_node->get_class();
+	for (const auto &alias : aliases) {
+		if (native_class == alias[0]) {
+			return alias[1];
+		}
+	}
+	return native_class.trim_prefix("Roblox");
+}
+
+bool rome_instance_is_a(const Node *p_node, const String &p_class) {
+	if (!p_node || p_class.is_empty()) {
+		return false;
+	}
+	if (p_class == "instance") {
+		// The generated table omits direct Instance parents; GodotLuau exposes
+		// every wrapped scene node as an Instance.
+		return true;
+	}
+	// This table contains public Roblox inheritance only. Using Godot's class
+	// chain would incorrectly classify Accessory as Model or WedgePart as Part.
+	static const HashMap<String, String> parents = [] {
+		HashMap<String, String> map;
+		for (int i = 0; i < GL_RBX_HERENCIA_N; i++) {
+			map[String(GL_RBX_HERENCIA[i][0]).to_lower()] = String(GL_RBX_HERENCIA[i][1]).to_lower();
+		}
+		return map;
+	}();
+	String current = rome_instance_class(p_node).to_lower();
+	for (int depth = 0; depth <= GL_RBX_HERENCIA_N; depth++) {
+		if (current == p_class) {
+			return true;
+		}
+		const String *parent = parents.getptr(current);
+		if (!parent) {
+			break;
+		}
+		current = *parent;
+	}
+	return false;
+}
+
+} // namespace
 
 Node *SceneTreeEditor::get_scene_node() const {
 	ERR_FAIL_COND_V(!is_inside_tree(), nullptr);
@@ -121,9 +191,27 @@ void SceneTreeEditor::_gui_input(const Ref<InputEvent> &p_event) {
 	if (connect_to_script_mode) {
 		return; // Don't do anything in this mode.
 	}
+	Ref<InputEventMouseButton> script_click = p_event;
+	if (is_scene_tree_dock && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) && script_click.is_valid() && script_click->is_pressed() && script_click->is_double_click() && script_click->get_button_index() == MouseButton::LEFT) {
+		TreeItem *item = tree->get_item_at_position(script_click->get_position());
+		if (item && item->is_selectable(0) && tree->get_button_id_at_position(script_click->get_position()) < 0) {
+			Node *node = _get_node(item->get_metadata(0));
+			if (node && node->has_method("get_codigo_luau")) {
+				Ref<Script> script = node->call("get_codigo_luau");
+				if (script.is_valid()) {
+					editor_selection->clear();
+					editor_selection->add_node(node);
+					set_selected(node, true);
+					tree->accept_event(); // Editable cells otherwise start renaming instead of activation.
+					call_deferred("emit_signal", SNAME("open_script"), script);
+					return;
+				}
+			}
+		}
+	}
 
 	Ref<InputEventMouseMotion> rome_motion = p_event;
-	if (rome_motion.is_valid() && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+	if (is_scene_tree_dock && rome_motion.is_valid() && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
 		// Studio offers the insert button on the hovered row only.
 		TreeItem *hovered = tree->get_item_at_position(tree->get_transform().xform_inv(rome_motion->get_position()));
 		_rome_set_hover(hovered ? _get_node(hovered->get_metadata(0)) : nullptr);
@@ -235,6 +323,10 @@ void SceneTreeEditor::_cell_button_pressed(Object *p_item, int p_column, int p_i
 			emit_signal(SNAME("open"), n->get_scene_file_path());
 		}
 	} else if (p_id == BUTTON_ROME_INSERT) {
+		// Node pickers and other dialogs have no editor selection.
+		if (!editor_selection) {
+			return;
+		}
 		editor_selection->clear();
 		editor_selection->add_node(n);
 		EditorNode::get_singleton()->emit_signal("rome_editor_action", "insert", Variant());
@@ -417,7 +509,7 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		return;
 	}
 	Node *model = get_scene_node();
-	if (model && model->is_class("RobloxGame3D") && p_node->get_parent() == model && p_node->get_name() == StringName("RunService")) {
+	if (model && (model->is_class("RobloxGame3D") || model->is_class("RobloxGame2D")) && p_node->get_parent() == model && p_node->get_name() == StringName("RunService")) {
 		node_cache.remove(p_node, true);
 		return;
 	}
@@ -1135,7 +1227,13 @@ void SceneTreeEditor::_update_tree(bool p_scroll_to_selected) {
 
 bool SceneTreeEditor::_update_filter(TreeItem *p_parent, bool p_scroll_to_selected) {
 	TreeItem *last_selected = nullptr;
+	const bool was_updating = updating_tree;
+	if (is_scene_tree_dock && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		// Temporary search expansion must not persist Node.display_folded.
+		updating_tree = true;
+	}
 	bool result = _update_filter_helper(p_parent, p_scroll_to_selected, last_selected);
+	updating_tree = was_updating;
 	if (p_scroll_to_selected && last_selected) {
 		// Scrolling to the first selected in the _update_filter call above followed by the last
 		// selected here is enough to frame all selected items as well as possible.
@@ -1154,6 +1252,7 @@ bool SceneTreeEditor::_update_filter_helper(TreeItem *p_parent, bool p_scroll_to
 		// Tree is empty, nothing to do here.
 		return false;
 	}
+	const bool rome_explorer = is_scene_tree_dock && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false));
 
 	// Now find other reasons to keep this Node, too.
 	PackedStringArray terms = filter.to_lower().split_spaces();
@@ -1202,6 +1301,18 @@ bool SceneTreeEditor::_update_filter_helper(TreeItem *p_parent, bool p_scroll_to
 		// Only scroll if we haven't already found a child to scroll to.
 		keep_for_children = _update_filter_helper(child, p_scroll_to_selected && !keep_for_children, r_last_selected) || keep_for_children;
 	}
+	if (rome_explorer) {
+		const StringName saved_fold = SNAME("rome_filter_original_fold");
+		if (!filter.strip_edges().is_empty()) {
+			if (!p_parent->has_meta(saved_fold)) {
+				p_parent->set_meta(saved_fold, p_parent->is_collapsed());
+			}
+			p_parent->set_collapsed(keep_for_children ? false : bool(p_parent->get_meta(saved_fold)));
+		} else if (p_parent->has_meta(saved_fold)) {
+			p_parent->set_collapsed(bool(p_parent->get_meta(saved_fold)));
+			p_parent->remove_meta(saved_fold);
+		}
+	}
 
 	if (!is_root) {
 		if (show_all_nodes) {
@@ -1222,7 +1333,9 @@ bool SceneTreeEditor::_update_filter_helper(TreeItem *p_parent, bool p_scroll_to
 
 		p_parent->set_selectable(0, true);
 	} else if (keep_for_children) {
-		p_parent->set_visible(!hide_filtered_out_parents || is_root);
+		// Studio keeps the hierarchy as context for its results. A nonmatching
+		// ancestor stays dimmed/unselectable instead of moving children out of it.
+		p_parent->set_visible(rome_explorer || !hide_filtered_out_parents || is_root);
 
 		if (!p_parent->is_visible()) {
 			TreeItem *candidate_sibling = p_parent;
@@ -1264,8 +1377,8 @@ bool SceneTreeEditor::_update_filter_helper(TreeItem *p_parent, bool p_scroll_to
 	}
 	if (is_root) {
 		Node *root_node = get_scene_node();
-		const bool rome_data_model = root_node && root_node->is_class("RobloxGame3D");
-		tree->set_hide_root(rome_data_model || (hide_filtered_out_parents && !selectable));
+		const bool rome_data_model = root_node && (root_node->is_class("RobloxGame3D") || root_node->is_class("RobloxGame2D"));
+		tree->set_hide_root(rome_data_model || (hide_filtered_out_parents && !rome_explorer && !selectable));
 		if (tree->is_root_hidden()) {
 			p_parent->set_collapsed(false);
 		}
@@ -1328,7 +1441,14 @@ bool SceneTreeEditor::_item_matches_all_terms(TreeItem *p_item, const PackedStri
 			String parameter = term.get_slicec(':', 0);
 			String argument = term.get_slicec(':', 1);
 
-			if (parameter == "type" || parameter == "t") {
+			if (parameter == "is" && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+				if (argument.is_empty() && filter_term_warning.is_empty()) {
+					filter_term_warning = String::utf8("Indica una clase: is:Part, is:BasePart o is:Model.");
+				}
+				if (!rome_instance_is_a(_get_node(p_item->get_metadata(0)), argument)) {
+					return false;
+				}
+			} else if (parameter == "type" || parameter == "t") {
 				// Filter by Type.
 				Node *item_node = _get_node(p_item->get_metadata(0));
 				if (!_node_matches_class_term(item_node, argument)) {
@@ -1990,6 +2110,10 @@ void SceneTreeEditor::_cell_collapsed(Object *p_obj) {
 		return;
 	}
 	if (!can_rename) {
+		return;
+	}
+	if (is_scene_tree_dock && !filter.strip_edges().is_empty() && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		// A manual collapse during a search is temporary, like automatic reveal.
 		return;
 	}
 

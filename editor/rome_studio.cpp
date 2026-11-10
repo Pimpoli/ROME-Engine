@@ -14,6 +14,7 @@
 #include "editor/editor_string_names.h"
 #include "editor/gui/editor_title_bar.h"
 #include "editor/scene/3d/node_3d_editor_plugin.h"
+#include "editor/scene/canvas_item_editor_plugin.h"
 #include "editor/themes/editor_scale.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/settings/editor_command_palette.h"
@@ -23,9 +24,12 @@
 #include "editor/gui/code_editor.h"
 #include "core/object/script_language.h"
 #include "core/object/editor_language.h"
+#include "core/object/script_language_extension.h"
+#include "editor/gui/editor_toaster.h"
 #include "scene/gui/code_edit.h"
 #include "scene/gui/popup_menu.h"
 #include "scene/3d/node_3d.h"
+#include "scene/2d/node_2d.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/button.h"
 #include "scene/gui/check_box.h"
@@ -36,11 +40,97 @@
 #include "scene/gui/option_button.h"
 #include "scene/gui/panel_container.h"
 #include "scene/gui/scroll_container.h"
+#include "scene/gui/scroll_bar.h"
 #include "scene/gui/separator.h"
 #include "scene/gui/spin_box.h"
 #include "scene/gui/text_edit.h"
 #include "scene/gui/texture_rect.h"
+#include "scene/main/viewport.h"
 #include "scene/resources/style_box_flat.h"
+
+namespace {
+enum RomePanelAction {
+	ROME_PANEL_EXPLORER,
+	ROME_PANEL_PROPERTIES,
+	ROME_PANEL_RESOURCES,
+	ROME_PANEL_OUTPUT,
+	ROME_PANEL_STUDIO_LAYOUT,
+};
+constexpr const char *QUICK_PANEL_NAMES[] = { "Explorador", "Propiedades", "Recursos", "Salida" };
+
+void rome_fit_header_popup(PopupMenu *p_menu) {
+	MenuButton *button = Object::cast_to<MenuButton>(p_menu->get_parent());
+	if (!button || button->is_layout_rtl()) {
+		return;
+	}
+	Rect2 button_rect = button->get_screen_rect();
+	if (button->get_viewport()->is_embedding_subwindows() && p_menu->get_force_native()) {
+		button_rect = button->get_viewport()->get_popup_base_transform_native().xform(button_rect);
+	}
+	const int width = MAX(p_menu->get_size().x, (int)Math::ceil(p_menu->get_contents_minimum_size().x));
+	Point2i position = p_menu->get_position();
+	position.x = MIN(position.x, (int)Math::floor(button_rect.get_end().x) - width);
+	p_menu->set_position(position);
+}
+}
+
+void EditorNode::_rome_fit_tab_strip(HBoxContainer *p_mezzanine, Control *p_left_gap, Control *p_right_gap, ScrollContainer *p_tabs) {
+	// Account for every fixed control and gap on either side of the strip. A
+	// matching space on the opposite side balances the run controls. All three
+	// expandable slots use their exact target widths as ratios, keeping minimum
+	// widths at zero so wide/custom tab layouts cannot prevent window shrinking.
+	real_t fixed_before = 0;
+	real_t fixed_after = 0;
+	int count_before = 0;
+	int count_after = 0;
+	bool after_tabs = false;
+	for (int i = 0; i < p_mezzanine->get_child_count(); i++) {
+		Control *control = Object::cast_to<Control>(p_mezzanine->get_child(i));
+		if (!control) { continue; }
+		if (control == p_tabs) {
+			after_tabs = true;
+			continue;
+		}
+		const bool gap = control == p_left_gap || control == p_right_gap;
+		if (!gap && !control->is_visible()) { continue; }
+		if (after_tabs) {
+			count_after++;
+			if (!gap) { fixed_after += Math::ceil(control->get_combined_minimum_size().x); }
+		} else {
+			count_before++;
+			if (!gap) { fixed_before += Math::ceil(control->get_combined_minimum_size().x); }
+		}
+	}
+	const real_t separation = p_mezzanine->get_theme_constant(SNAME("separation"));
+	fixed_before += count_before * separation;
+	fixed_after += count_after * separation;
+	const real_t balanced_budget = p_mezzanine->get_size().x - 2 * MAX(fixed_before, fixed_after);
+	const real_t preferred_width = rome_tabs_row->get_combined_minimum_size().x;
+	const bool center = !rome_tabs_left_aligned && (balanced_budget >= preferred_width ||
+			(p_mezzanine->get_size().x >= 1500 * EDSCALE && balanced_budget >= 240 * EDSCALE));
+	const real_t tab_width = center ? Math::ceil(MIN(preferred_width, balanced_budget)) : 0;
+	const real_t left_width = center ? MAX(real_t(0), Math::floor((p_mezzanine->get_size().x - tab_width) * 0.5f) - fixed_before) : 0;
+	const real_t right_width = center ? MAX(real_t(0), p_mezzanine->get_size().x - tab_width - fixed_before - fixed_after - left_width) : 0;
+	p_left_gap->set_visible(center);
+	p_right_gap->set_visible(center);
+	p_left_gap->set_stretch_ratio(center ? MAX(real_t(0.001), left_width) : 1);
+	p_right_gap->set_stretch_ratio(center ? MAX(real_t(0.001), right_width) : 1);
+	p_tabs->set_stretch_ratio(center ? MAX(real_t(0.001), tab_width) : 1);
+}
+
+static void rome_scroll_to_active_tab(ScrollContainer *p_scroll, const Ref<ButtonGroup> &p_group) {
+	if (!p_scroll || p_group.is_null() || p_scroll->get_child_count() == 0) { return; }
+	Node *row = p_scroll->get_child(0);
+	// Rebuilding tabs removes the old buttons before queue_free() releases their
+	// ButtonGroup membership. Inspect only the current row, not pending old tabs.
+	for (int i = 0; i < row->get_child_count(); i++) {
+		Button *button = Object::cast_to<Button>(row->get_child(i));
+		if (button && button->get_button_group() == p_group && button->is_pressed()) {
+			p_scroll->ensure_control_visible(button);
+			return;
+		}
+	}
+}
 
 void rome_main_plugins_menu(int p_id, EditorNode *p_editor) {
 	if (p_id == 0) {
@@ -65,10 +155,66 @@ void EditorNode::_rome_view_menu(int p_id) {
 	}
 }
 
+EditorDock *EditorNode::_rome_get_quick_dock(int p_id) const {
+	switch (p_id) {
+		case ROME_PANEL_EXPLORER:
+			return SceneTreeDock::get_singleton();
+		case ROME_PANEL_PROPERTIES:
+			return InspectorDock::get_singleton();
+		case ROME_PANEL_RESOURCES:
+			return EditorDockManager::get_singleton()->get_dock_by_name("Recursos");
+		case ROME_PANEL_OUTPUT:
+			return log;
+	}
+	return nullptr;
+}
+
+void EditorNode::_rome_panel_menu_opened(PopupMenu *p_menu) {
+	for (int i = 0; i < (int)std_size(QUICK_PANEL_NAMES); i++) {
+		EditorDock *dock = _rome_get_quick_dock(i);
+		p_menu->set_item_disabled(i, !dock);
+		p_menu->set_item_checked(i, dock && dock->is_dock_open() && dock->is_visible_in_tree());
+	}
+}
+
+void EditorNode::_rome_panel_menu_selected(int p_id, PopupMenu *p_menu) {
+	if (p_id == ROME_PANEL_STUDIO_LAYOUT) {
+		_rome_apply_studio_layout();
+		return;
+	}
+	EditorDock *dock = _rome_get_quick_dock(p_id);
+	if (!dock) {
+		return;
+	}
+	if (dock->is_dock_open() && dock->is_visible_in_tree()) {
+		editor_dock_manager->close_dock(dock);
+	} else {
+		editor_dock_manager->force_focus_dock(dock);
+	}
+	_rome_panel_menu_opened(p_menu);
+}
+
 void EditorNode::_rome_ribbon_tab_changed(int p_tab) {
 	for (int i = 0; i < rome_ribbon_pages.size(); i++) {
 		rome_ribbon_pages[i]->set_visible(i == p_tab);
 	}
+	// A different page starts at its first command rather than inheriting the
+	// previous page's horizontal position.
+	if (rome_toolbar_scroll) {
+		rome_toolbar_scroll->set_h_scroll(0);
+	}
+	ScrollContainer *tabs_scroll = Object::cast_to<ScrollContainer>(rome_tabs_row->get_parent());
+	if (tabs_scroll) {
+		callable_mp_static(&rome_scroll_to_active_tab).bind(tabs_scroll, rome_ribbon_group).call_deferred();
+	}
+	if (rome_toolbar_collapsed && rome_toolbar_scroll) {
+		rome_toolbar_revealed = true;
+		rome_toolbar_scroll->show();
+		rome_toolbar_tools_panel->show();
+		rome_toolbar_tools_row->show();
+		rome_toolbar_hover_timer->start();
+	}
+	_rome_queue_toolbar_overflow_update();
 
 }
 
@@ -109,9 +255,17 @@ void EditorNode::_rome_editor_action(const String &p_action) {
 			CodeEdit *text = Object::cast_to<CodeEdit>(editor->get_base_editor());
 			Ref<Script> script = editor->get_edited_resource();
 			if (text && script.is_valid()) {
+				ScriptLanguage *language = script->get_language();
+				ScriptLanguageExtension *extension = Object::cast_to<ScriptLanguageExtension>(language);
+				if (!language->get_editor_language() || (extension && !GDVIRTUAL_IS_OVERRIDDEN_PTR(extension, _auto_indent_code))) {
+					EditorToaster::get_singleton()->popup_str(vformat(String::utf8("Formato todavía no está disponible para %s."), language->get_name()), EditorToaster::SEVERITY_INFO);
+					return;
+				}
 				String source = text->get_text();
-				if (script->get_language()->get_editor_language()) {
-					script->get_language()->get_editor_language()->format_code(source, 0, text->get_line_count() - 1);
+				language->get_editor_language()->format_code(source, 0, text->get_line_count() - 1);
+				// An empty result would erase the whole script.
+				if (source.is_empty() || source == text->get_text()) {
+					return;
 				}
 				text->begin_complex_operation();
 				text->select_all();
@@ -223,6 +377,15 @@ bool EditorNode::_rome_shortcut_input(const Ref<InputEvent> &p_event) {
 	if (!bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
 		return false;
 	}
+	// Studio's property search is global, including when a script has focus.
+	if (ED_IS_SHORTCUT("rome/filter_properties", p_event)) {
+		InspectorDock::get_singleton()->focus_property_filter();
+		return true;
+	}
+	if (ED_IS_SHORTCUT("rome/filter_explorer", p_event)) {
+		SceneTreeDock::get_singleton()->focus_filter();
+		return true;
+	}
 	Control *focus = get_viewport()->gui_get_focus_owner();
 	if (Object::cast_to<LineEdit>(focus) || Object::cast_to<TextEdit>(focus)) {
 		return false;
@@ -237,6 +400,10 @@ bool EditorNode::_rome_shortcut_input(const Ref<InputEvent> &p_event) {
 	}
 	if (editor_main_screen->get_current_tab_control() == ScriptEditor::get_singleton()) {
 		return false;
+	}
+	if (ED_IS_SHORTCUT("rome/insert_object", p_event)) {
+		_rome_emit_action("insert", Variant());
+		return true;
 	}
 	const char *tools[] = { "rome/tool_select", "rome/tool_move", "rome/tool_scale", "rome/tool_rotate", "rome/tool_transform" };
 	const int modes[] = { Node3DEditor::TOOL_MODE_SELECT, Node3DEditor::TOOL_MODE_MOVE, Node3DEditor::TOOL_MODE_SCALE, Node3DEditor::TOOL_MODE_ROTATE, Node3DEditor::TOOL_MODE_TRANSFORM };
@@ -263,10 +430,56 @@ bool EditorNode::_rome_shortcut_input(const Ref<InputEvent> &p_event) {
 void EditorNode::_rome_prefer_world_view() {
 	// Studio opens a place on its world; an empty script screen is never the first view.
 	ScriptEditor *scripts = ScriptEditor::get_singleton();
-	Node *root = editor_data.get_edited_scene_root();
-	if (scripts && editor_main_screen->get_current_tab_control() == scripts && scripts->get_open_scripts().is_empty() && Object::cast_to<Node3D>(root)) {
-		EditorInterface::get_singleton()->set_main_screen_editor("3D");
+	Node *root = editor_data.get_edited_scene_count() > 0 ? editor_data.get_edited_scene_root() : nullptr;
+	if (root && root->is_class("RobloxGame2D")) {
+		_rome_set_workspace("2D");
+		return;
 	}
+	if (scripts && editor_main_screen->get_current_tab_control() == scripts && scripts->get_open_scripts().is_empty() && root) {
+		EditorInterface::get_singleton()->set_main_screen_editor(rome_get_scene_view());
+	}
+}
+
+String EditorNode::rome_get_scene_view() {
+	Node *root = editor_data.get_edited_scene_count() > 0 ? editor_data.get_edited_scene_root() : nullptr;
+	if (root) {
+		const String *saved = rome_scene_views.getptr(root->get_instance_id());
+		if (saved) {
+			return *saved;
+		}
+		return Object::cast_to<Node2D>(root) || Object::cast_to<Control>(root) ? "2D" : "3D";
+	}
+	return String(ProjectSettings::get_singleton()->get_setting("rome/studio/dimension", "3d")) == "2d" ? "2D" : "3D";
+}
+
+void EditorNode::_rome_workspace_changed(int p_tab) {
+	Control *active = editor_main_screen->get_current_tab_control();
+	const String view = active == CanvasItemEditor::get_singleton() ? "2D" : active == Node3DEditor::get_singleton() ? "3D" : "";
+	if (view == "2D" || view == "3D") {
+		Node *root = editor_data.get_edited_scene_count() > 0 ? editor_data.get_edited_scene_root() : nullptr;
+		if (root) {
+			rome_scene_views[root->get_instance_id()] = view;
+		}
+	}
+	if (rome_workspace_2d && rome_workspace_3d) {
+		rome_workspace_2d->set_pressed_no_signal(view == "2D");
+		rome_workspace_3d->set_pressed_no_signal(view == "3D");
+	}
+}
+
+void EditorNode::_rome_set_workspace(const String &p_view) {
+	if (p_view == "2D" || p_view == "3D") {
+		EditorInterface::get_singleton()->set_main_screen_editor(p_view);
+		_rome_workspace_changed(0);
+	}
+}
+
+int EditorNode::_rome_new_component_scene_with_dimension(const String &p_dimension) {
+	if (p_dimension != "2d" && p_dimension != "3d") {
+		return -1;
+	}
+	rome_next_scene_dimension = p_dimension == "2d" ? 2 : 3;
+	return new_scene();
 }
 
 void EditorNode::_rome_play_menu(int p_id) {
@@ -281,23 +494,28 @@ void EditorNode::_rome_play_menu(int p_id) {
 
 void EditorNode::_rome_create_ribbon() {
 	PanelContainer *ribbon = memnew(PanelContainer);
+	rome_toolbar = ribbon;
 	ribbon->set_name("ROMERibbon");
 	Ref<StyleBoxFlat> background;
 	background.instantiate();
-	background->set_bg_color(Color(0.095, 0.10, 0.116));
-	background->set_content_margin_individual(6 * EDSCALE, 2 * EDSCALE, 6 * EDSCALE, 3 * EDSCALE);
+	background->set_bg_color(Color::html("15161b"));
+	background->set_content_margin_individual(4 * EDSCALE, EDSCALE, 4 * EDSCALE, 0);
 	background->set_border_width(SIDE_BOTTOM, EDSCALE);
-	background->set_border_color(Color::html("34353d"));
+	background->set_border_color(Color::html("303139"));
 	ribbon->add_theme_style_override("panel", background);
 	main_vbox->add_child(ribbon);
 	main_vbox->move_child(ribbon, title_bar->get_index() + 1);
 	VBoxContainer *layout = memnew(VBoxContainer);
-	layout->add_theme_constant_override("separation", 2 * EDSCALE);
+	layout->add_theme_constant_override("separation", 0);
 	ribbon->add_child(layout);
 	HBoxContainer *mezzanine = memnew(HBoxContainer);
-	mezzanine->set_custom_minimum_size(Size2(0, 34) * EDSCALE);
+	mezzanine->set_name("ROMEMezzanine");
+	mezzanine->set_custom_minimum_size(Size2(0, 32) * EDSCALE);
+	mezzanine->add_theme_constant_override("separation", 4 * EDSCALE);
 	layout->add_child(mezzanine);
 	rome_run_slot = memnew(HBoxContainer);
+	rome_run_slot->set_name("ROMETestControls");
+	rome_run_slot->add_theme_constant_override("separation", 4 * EDSCALE);
 	mezzanine->add_child(rome_run_slot);
 	MenuButton *test_menu = memnew(MenuButton);
 	test_menu->set_name("ROMETestMenu");
@@ -305,8 +523,16 @@ void EditorNode::_rome_create_ribbon() {
 	test_menu->set_flat(false);
 	test_menu->set_button_icon(theme->get_icon(SNAME("GuiDropdown"), EditorStringName(EditorIcons)));
 	test_menu->set_icon_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
-	test_menu->set_custom_minimum_size(Size2(86, 24) * EDSCALE);
+	test_menu->set_custom_minimum_size(Size2(76, 26) * EDSCALE);
+	test_menu->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
 	test_menu->set_tooltip_text("Opciones de prueba");
+	_rome_style_ribbon_button(test_menu);
+	Ref<StyleBoxFlat> test_style = memnew(StyleBoxFlat);
+	test_style->set_bg_color(Color::html("22232b"));
+	test_style->set_corner_radius_all(3 * EDSCALE);
+	test_style->set_content_margin_individual(8 * EDSCALE, 2 * EDSCALE, 6 * EDSCALE, 2 * EDSCALE);
+	test_menu->add_theme_style_override("normal", test_style);
+	test_menu->add_theme_style_override("normal_mirrored", test_style);
 	PopupMenu *test_popup = test_menu->get_popup();
 	test_popup->add_item("Probar (F5)", 0);
 	test_popup->add_item("Probar escena actual (F6)", 1);
@@ -315,6 +541,9 @@ void EditorNode::_rome_create_ribbon() {
 	test_popup->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_rome_play_menu));
 	rome_run_slot->add_child(test_menu);
 	ED_SHORTCUT("rome/stop_test", "Detener prueba", KeyModifierMask::SHIFT | Key::F5);
+	ED_SHORTCUT("rome/filter_properties", "Filtrar propiedades", KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::SHIFT | Key::P);
+	ED_SHORTCUT("rome/filter_explorer", "Buscar en el Explorador", KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::SHIFT | Key::X);
+	ED_SHORTCUT("rome/insert_object", "Insertar objeto", KeyModifierMask::CMD_OR_CTRL | Key::I);
 	ED_SHORTCUT("rome/tool_select", "Herramienta Seleccionar", KeyModifierMask::CMD_OR_CTRL | Key::KEY_1);
 	ED_SHORTCUT("rome/tool_move", "Herramienta Mover", KeyModifierMask::CMD_OR_CTRL | Key::KEY_2);
 	ED_SHORTCUT("rome/tool_scale", "Herramienta Escalar", KeyModifierMask::CMD_OR_CTRL | Key::KEY_3);
@@ -326,42 +555,139 @@ void EditorNode::_rome_create_ribbon() {
 	ED_SHORTCUT("rome/ungroup", "Desagrupar", KeyModifierMask::CMD_OR_CTRL | Key::U);
 	Control *left_gap = memnew(Control);
 	left_gap->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	left_gap->set_stretch_ratio(1.0);
 	mezzanine->add_child(left_gap);
 	rome_ribbon_group.instantiate();
 	rome_tabs_row = memnew(HBoxContainer);
-	rome_tabs_row->add_theme_constant_override("separation", 4 * EDSCALE);
-	mezzanine->add_child(rome_tabs_row);
+	rome_tabs_row->add_theme_constant_override("separation", 2 * EDSCALE);
+	ScrollContainer *tabs_scroll = memnew(ScrollContainer);
+	tabs_scroll->set_name("ROMEToolbarTabs");
+	tabs_scroll->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	tabs_scroll->set_stretch_ratio(1.0);
+	tabs_scroll->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	tabs_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_AUTO);
+	tabs_scroll->set_tooltip_text(String::utf8("Desplaza la rueda para ver más pestañas"));
+	mezzanine->add_child(tabs_scroll);
+	tabs_scroll->add_child(rome_tabs_row);
+	const Callable scroll_active_tab = callable_mp_static(&rome_scroll_to_active_tab).bind(tabs_scroll, rome_ribbon_group);
+	rome_tabs_row->connect("resized", scroll_active_tab, CONNECT_DEFERRED);
+	tabs_scroll->connect("resized", scroll_active_tab, CONNECT_DEFERRED);
+	// The range is updated after child layout; scrolling before then clamps to 0.
+	tabs_scroll->get_h_scroll_bar()->connect("changed", scroll_active_tab, CONNECT_DEFERRED);
 	const char *tab_names[] = { "Inicio", "Avatar", "UI", "Script", "Modelo", "Plugins" };
 	for (int i = 0; i < 6; i++) {
 		Button *tab = memnew(Button);
 		tab->set_text(tab_names[i]);
-		tab->set_custom_minimum_size(Size2(80, 24) * EDSCALE);
-		tab->set_flat(true);
+		tab->set_custom_minimum_size(Size2(64, 28) * EDSCALE);
+		tab->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
 		tab->set_toggle_mode(true);
 		tab->set_button_group(rome_ribbon_group);
 		tab->set_pressed(i == 0);
-		Ref<StyleBoxFlat> active = memnew(StyleBoxFlat);
-		active->set_bg_color(Color::html("303139"));
-		active->set_corner_radius_all(3 * EDSCALE);
-		active->set_content_margin_individual(14 * EDSCALE, 2 * EDSCALE, 14 * EDSCALE, 2 * EDSCALE);
-		tab->add_theme_style_override("pressed", active);
 		tab->connect("pressed", callable_mp(this, &EditorNode::_rome_ribbon_tab_changed).bind(i));
 		rome_tabs_row->add_child(tab);
 		rome_ribbon_tabs.push_back(tab);
 	}
 	Control *right_gap = memnew(Control);
 	right_gap->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	right_gap->set_stretch_ratio(3.0);
+	right_gap->set_stretch_ratio(1.0);
 	mezzanine->add_child(right_gap);
+	// Keep the existing action/page indices while placing Modelo next to Inicio.
+	rome_tabs_row->move_child(rome_ribbon_tabs[4], 1);
+
+	HBoxContainer *workspace = memnew(HBoxContainer);
+	workspace->set_name("ROMEWorkspaceControls");
+	workspace->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+	workspace->add_theme_constant_override("separation", 2 * EDSCALE);
+	mezzanine->add_child(workspace);
+	rome_workspace_2d = memnew(Button);
+	rome_workspace_3d = memnew(Button);
+	for (Button *button : { rome_workspace_2d, rome_workspace_3d }) {
+		const String view = button == rome_workspace_2d ? "2D" : "3D";
+		button->set_name("ROMEWorkspace" + view);
+		button->set_text(view);
+		button->set_toggle_mode(true);
+		button->set_custom_minimum_size(Size2(28, 26) * EDSCALE);
+		button->set_tooltip_text("Abrir espacio de trabajo " + view);
+		button->connect("pressed", callable_mp(this, &EditorNode::_rome_set_workspace).bind(view));
+		workspace->add_child(button);
+	}
+	workspace->add_child(memnew(VSeparator));
+
+	MenuButton *panels = memnew(MenuButton);
+	panels->set_name("ROMEQuickPanels");
+	panels->set_button_icon(theme->get_icon(SNAME("Window"), EditorStringName(EditorIcons)));
+	panels->set_custom_minimum_size(Size2(28, 26) * EDSCALE);
+	panels->set_tooltip_text("Mostrar u ocultar paneles");
+	panels->set_accessibility_name("Paneles");
+	_rome_style_ribbon_button(panels);
+	workspace->add_child(panels);
+	PopupMenu *panel_menu = panels->get_popup();
+	for (int i = 0; i < (int)std_size(QUICK_PANEL_NAMES); i++) {
+		panel_menu->add_check_item(QUICK_PANEL_NAMES[i], i);
+	}
+	if (ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) {
+		panel_menu->add_separator();
+		panel_menu->add_item(String::utf8(u8"Distribución estilo Studio"), ROME_PANEL_STUDIO_LAYOUT);
+	}
+	panel_menu->set_hide_on_checkable_item_selection(false);
+	panel_menu->connect("about_to_popup", callable_mp_static(&rome_fit_header_popup).bind(panel_menu));
+	panel_menu->connect("about_to_popup", callable_mp(this, &EditorNode::_rome_panel_menu_opened).bind(panel_menu));
+	panel_menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_rome_panel_menu_selected).bind(panel_menu));
+
+	rome_fit_tabs = callable_mp(this, &EditorNode::_rome_fit_tab_strip).bind(mezzanine, left_gap, right_gap, tabs_scroll);
+	mezzanine->connect("resized", rome_fit_tabs, CONNECT_DEFERRED);
+	rome_tabs_row->connect("minimum_size_changed", rome_fit_tabs, CONNECT_DEFERRED);
+	rome_run_slot->connect("minimum_size_changed", rome_fit_tabs, CONNECT_DEFERRED);
+	rome_run_slot->connect("resized", rome_fit_tabs, CONNECT_DEFERRED);
+	workspace->connect("minimum_size_changed", rome_fit_tabs, CONNECT_DEFERRED);
+
+	rome_toolbar_tools_panel = memnew(PanelContainer);
+	rome_toolbar_tools_panel->set_name("ROMEToolbarToolsPanel");
+	Ref<StyleBoxFlat> tools_background = memnew(StyleBoxFlat);
+	tools_background->set_bg_color(Color::html("1d1e24"));
+	tools_background->set_border_width(SIDE_TOP, EDSCALE);
+	tools_background->set_border_color(Color::html("303139"));
+	tools_background->set_content_margin_individual(4 * EDSCALE, 2 * EDSCALE, 4 * EDSCALE, 2 * EDSCALE);
+	rome_toolbar_tools_panel->add_theme_style_override("panel", tools_background);
+	layout->add_child(rome_toolbar_tools_panel);
+	rome_toolbar_tools_row = memnew(HBoxContainer);
+	rome_toolbar_tools_row->set_name("ROMEToolbarToolsRow");
+	rome_toolbar_tools_row->add_theme_constant_override("separation", 1 * EDSCALE);
+	rome_toolbar_tools_panel->add_child(rome_toolbar_tools_row);
+	rome_toolbar_back = memnew(Button);
+	rome_toolbar_next = memnew(Button);
+	for (Button *arrow : { rome_toolbar_back, rome_toolbar_next }) {
+		const bool back = arrow == rome_toolbar_back;
+		arrow->set_name(back ? "ROMEToolbarPrevious" : "ROMEToolbarNext");
+		arrow->set_button_icon(theme->get_icon(back ? SNAME("ArrowLeft") : SNAME("ArrowRight"), EditorStringName(EditorIcons)));
+		arrow->set_tooltip_text(back ? "Ver herramientas anteriores" : String::utf8("Ver más herramientas"));
+		arrow->set_focus_mode(Control::FOCUS_NONE);
+		arrow->set_custom_minimum_size(Size2(22, 40) * EDSCALE);
+		arrow->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+		_rome_style_ribbon_button(arrow);
+		arrow->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_rome_scroll_toolbar).bind(back ? -1 : 1));
+		arrow->hide();
+	}
+	rome_toolbar_tools_row->add_child(rome_toolbar_back);
 	ScrollContainer *scroll = memnew(ScrollContainer);
+	rome_toolbar_scroll = scroll;
+	scroll->set_name("ROMEToolbarTools");
+	scroll->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	scroll->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
-	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_AUTO);
-	scroll->set_custom_minimum_size(Size2(0, 60) * EDSCALE);
-	layout->add_child(scroll);
+	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_SHOW_NEVER);
+	scroll->set_custom_minimum_size(Size2(0, 54) * EDSCALE);
+	rome_toolbar_tools_row->add_child(scroll);
+	rome_toolbar_tools_row->add_child(rome_toolbar_next);
 	HBoxContainer *pages = memnew(HBoxContainer);
 	rome_pages_row = pages;
 	pages->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	scroll->add_child(pages);
+	const Callable update_overflow = callable_mp(this, &EditorNode::_rome_queue_toolbar_overflow_update);
+	rome_toolbar_tools_row->connect("resized", update_overflow);
+	scroll->connect("resized", update_overflow);
+	pages->connect("minimum_size_changed", update_overflow);
+	scroll->get_h_scroll_bar()->connect("changed", update_overflow);
+	scroll->get_h_scroll_bar()->connect("value_changed", update_overflow.unbind(1));
 	for (int i = 0; i < 6; i++) {
 		HBoxContainer *page = memnew(HBoxContainer);
 		page->add_theme_constant_override("separation", 1 * EDSCALE);
@@ -549,6 +875,7 @@ void EditorNode::_rome_create_ribbon() {
 	add_tab->set_flat(true);
 	add_tab->set_tooltip_text("Crear una nueva pesta" + String::chr(0x00f1) + "a personalizada");
 	add_tab->set_custom_minimum_size(Size2(36, 24) * EDSCALE);
+	_rome_style_ribbon_button(add_tab);
 	add_tab->connect("pressed", callable_mp(this, &EditorNode::_rome_prompt_new_tab));
 	rome_tabs_row->add_child(add_tab);
 	if (EditorSettings::get_singleton()->has_setting("rome/studio/custom_tabs")) {
@@ -558,4 +885,6 @@ void EditorNode::_rome_create_ribbon() {
 	_rome_ribbon_tab_changed(0);
 	editor_selection->connect("selection_changed", callable_mp(this, &EditorNode::_rome_selection_changed));
 	_rome_selection_changed();
+	_rome_init_toolbar_appearance(workspace);
+	rome_toolbar_menu->connect("about_to_popup", callable_mp_static(&rome_fit_header_popup).bind(rome_toolbar_menu));
 }

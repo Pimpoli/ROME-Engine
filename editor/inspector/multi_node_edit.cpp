@@ -372,6 +372,9 @@ void MultiNodeEdit::set_property_field(const StringName &p_property, const Varia
 }
 
 void MultiNodeEdit::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_node_count"), &MultiNodeEdit::get_node_count);
+	ClassDB::bind_method(D_METHOD("get_node", "index"), &MultiNodeEdit::get_node);
+	ClassDB::bind_method(D_METHOD("get_edited_class_name"), &MultiNodeEdit::get_edited_class_name);
 	ClassDB::bind_method("_hide_script_from_inspector", &MultiNodeEdit::_hide_script_from_inspector);
 	ClassDB::bind_method("_hide_metadata_from_inspector", &MultiNodeEdit::_hide_metadata_from_inspector);
 	ClassDB::bind_method("_get_editor_name", &MultiNodeEdit::_get_editor_name);

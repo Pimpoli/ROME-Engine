@@ -67,12 +67,14 @@ Button *EditorNode::_rome_make_tool(Control *p_row, const String &p_id) {
 		button->connect("pressed", command.action);
 		p_row->add_child(button);
 		VBoxContainer *inside = memnew(VBoxContainer);
+		inside->set_name("ToolContent");
 		inside->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		inside->set_anchors_and_offsets_preset(Control::PRESET_FULL_RECT);
 		inside->set_alignment(BoxContainer::ALIGNMENT_CENTER);
 		inside->add_theme_constant_override("separation", 3 * EDSCALE);
 		button->add_child(inside);
 		TextureRect *texture = memnew(TextureRect);
+		texture->set_name("ToolIcon");
 		texture->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		texture->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
 		texture->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_CENTERED);
@@ -84,6 +86,7 @@ Button *EditorNode::_rome_make_tool(Control *p_row, const String &p_id) {
 		entry.icon = command.icon;
 		rome_ribbon_icons.push_back(entry);
 		Label *caption = memnew(Label(command.label));
+		caption->set_name("ToolCaption");
 		caption->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 		caption->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
 		caption->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
@@ -127,6 +130,7 @@ Button *EditorNode::_rome_make_tool(Control *p_row, const String &p_id) {
 			arrow_entry.icon = SNAME("GuiDropdown");
 			rome_ribbon_icons.push_back(arrow_entry);
 		}
+		_rome_style_toolbar_controls(button);
 		return button;
 	}
 	return nullptr;
@@ -340,11 +344,6 @@ void EditorNode::_rome_rebuild_custom_tabs() {
 		tab->set_toggle_mode(true);
 		tab->set_button_group(rome_ribbon_group);
 		tab->set_custom_minimum_size(Size2(80, 24) * EDSCALE);
-		Ref<StyleBoxFlat> selected = memnew(StyleBoxFlat);
-		selected->set_bg_color(Color::html("303139"));
-		selected->set_corner_radius_all(3 * EDSCALE);
-		selected->set_content_margin_individual(14 * EDSCALE, 2 * EDSCALE, 14 * EDSCALE, 2 * EDSCALE);
-		tab->add_theme_style_override("pressed", selected);
 		PopupMenu *context = memnew(PopupMenu);
 		context->set_name("ROMECustomTabMenu" + itos(i));
 		context->add_item("Renombrar pesta" + String::chr(0x00f1) + "a", ROME_TAB_RENAME);
@@ -366,6 +365,7 @@ void EditorNode::_rome_rebuild_custom_tabs() {
 		_rome_rebuild_custom_page(i);
 	}
 	for (int i = 6 + rome_custom_tabs.size(); i < rome_ribbon_pages.size(); i++) { rome_ribbon_pages[i]->hide(); }
+	_rome_connect_toolbar_tabs();
 }
 
 void EditorNode::_rome_rebuild_custom_page(int p_tab) {
@@ -410,12 +410,15 @@ void EditorNode::_rome_rebuild_custom_page(int p_tab) {
 	Button *add = memnew(Button);
 	add->set_text("+\nAgregar herramientas");
 	add->set_name("AddTools" + itos(p_tab));
+	add->set_meta("rome_add_tools", true);
+	add->set_tooltip_text("Agregar herramientas");
 	add->set_flat(true);
 	add->set_custom_minimum_size(Size2(112, 54) * EDSCALE);
 	add->add_theme_font_size_override("font_size", 11 * EDSCALE);
 	add->connect("pressed", callable_mp(this, &EditorNode::_rome_show_tool_picker).bind(p_tab));
 	page->add_child(add);
 	Control *empty = memnew(Control);
+	empty->set_meta("rome_tool_spacer", true);
 	empty->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	empty->set_custom_minimum_size(Size2(24, 54) * EDSCALE);
 	page->add_child(empty);
@@ -428,6 +431,7 @@ void EditorNode::_rome_rebuild_custom_page(int p_tab) {
 	empty->connect("gui_input", callable_mp_static(&rome_tab_context).bind(context));
 	add->connect("gui_input", callable_mp_static(&rome_tab_context).bind(context));
 	_rome_selection_changed();
+	_rome_style_toolbar_controls(page);
 }
 
 void EditorNode::_rome_show_tool_picker(int p_tab) {

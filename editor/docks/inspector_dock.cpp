@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "inspector_dock.h"
+#include "editor_dock_manager.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/resource_loader.h"
@@ -711,6 +712,12 @@ void InspectorDock::apply_script_properties(Object *p_object) {
 		}
 	}
 	stored_properties.clear();
+}
+
+void InspectorDock::focus_property_filter() {
+	EditorDockManager::get_singleton()->focus_dock(this);
+	search->grab_focus();
+	search->select_all();
 }
 
 void InspectorDock::shortcut_input(const Ref<InputEvent> &p_event) {

@@ -96,6 +96,13 @@ class SceneTreeDock : public EditorDock {
 		TOOL_CENTER_PARENT,
 		TOOL_HIDE_FILTERED_OUT_PARENTS,
 		TOOL_ACCESSIBILITY_WARNINGS,
+		TOOL_ROME_GROUP_MODEL,
+		TOOL_ROME_GROUP_FOLDER,
+		TOOL_ROME_UNGROUP,
+		TOOL_ROME_SELECT_CHILDREN,
+		TOOL_ROME_SELECT_PARENTS,
+		TOOL_ROME_PASTE_WORKSPACE,
+		TOOL_ROME_OPEN_SCRIPT,
 	};
 
 	enum {
@@ -138,6 +145,10 @@ class SceneTreeDock : public EditorDock {
 	Tree *remote_tree = nullptr;
 
 	void _tool_selected(int p_tool, bool p_confirm_override = false);
+	bool _rome_can_group_selection(bool p_ungroup = false) const;
+	bool _rome_fixed_container(Node *p_node) const;
+	void _rome_popup_context(const Vector2 &p_position);
+	Vector<Node *> _rome_hierarchy_targets(bool p_parents) const;
 	void _property_selected(int p_idx);
 
 	Node *property_drop_node = nullptr;
@@ -176,6 +187,9 @@ class SceneTreeDock : public EditorDock {
 
 	PopupMenu *menu = nullptr;
 	PopupMenu *menu_subresources = nullptr;
+	PopupMenu *menu_rome_hierarchy = nullptr;
+	PopupMenu *menu_rome_context = nullptr;
+	PopupMenu *menu_rome_quick_hierarchy = nullptr;
 	PopupMenu *menu_properties = nullptr;
 	ConfirmationDialog *clear_inherit_confirm = nullptr;
 
@@ -351,6 +365,7 @@ protected:
 public:
 	String get_filter();
 	void set_filter(const String &p_filter);
+	void focus_filter();
 	void open_create_dialog(const String &p_preferred_type);
 	void rome_open_selected_script();
 	void save_branch_to_file(const String &p_directory);
@@ -385,7 +400,7 @@ public:
 	void attach_shader_to_selected(int p_preferred_mode = -1);
 	void open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode = -1);
 
-	List<Node *> paste_nodes(bool p_paste_as_sibling = false);
+	List<Node *> paste_nodes(bool p_paste_as_sibling = false, Node *p_forced_parent = nullptr);
 	void paste_node_as_replacement();
 	List<Node *> get_node_clipboard() const;
 

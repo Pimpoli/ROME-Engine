@@ -582,7 +582,7 @@ EditorSceneTabs::EditorSceneTabs() {
 		rome_document_tabs->set_name("ROMEDocumentTabs");
 		rome_document_tabs->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 		rome_document_tabs->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
-		rome_document_tabs->set_tab_close_display_policy(TabBar::CLOSE_BUTTON_SHOW_ACTIVE_ONLY);
+		rome_document_tabs->set_tab_close_display_policy(TabBar::CLOSE_BUTTON_SHOW_ACTIVE_OR_HOVER);
 		rome_document_tabs->set_max_tab_width(230 * EDSCALE);
 		tabbar_container->add_child(rome_document_tabs);
 		tabbar_container->move_child(rome_document_tabs, scene_tabs->get_index());

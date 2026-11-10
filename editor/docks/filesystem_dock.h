@@ -436,6 +436,8 @@ public:
 	String get_folder_path_at_mouse_position() const;
 
 	void navigate_to_path(const String &p_path);
+	Error rome_relocate_resource(const String &p_source, const String &p_destination);
+	bool rome_is_resource_operation_ready() const;
 	void focus_on_path();
 	void focus_on_filter();
 	void create_directory(const String &p_path, const String &p_base_dir);

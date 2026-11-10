@@ -158,6 +158,7 @@ public:
 	void focus_dock(EditorDock *p_dock);
 	void force_focus_dock(EditorDock *p_dock); // Ignore can_switch_dock().
 	void make_dock_floating(EditorDock *p_dock);
+	void move_dock_to_slot(EditorDock *p_dock, EditorDock::DockSlot p_slot);
 
 	void set_docks_visible(bool p_show);
 	bool are_docks_visible() const;

@@ -30,6 +30,7 @@
 
 #include "dock_tab_container.h"
 
+#include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
 #include "editor/docks/editor_dock.h"
 #include "editor/docks/editor_dock_manager.h"
@@ -37,6 +38,8 @@
 #include "editor/editor_string_names.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
+#include "scene/gui/box_container.h"
+#include "scene/gui/button.h"
 #include "scene/resources/style_box_flat.h"
 
 bool EditorDockDragHint::can_drop_data(const Point2 &p_point, const Variant &p_data) const {
@@ -232,18 +235,58 @@ void DockTabContainer::_tab_clicked() {
 		return;
 	}
 	EditorDockManager::get_singleton()->force_focus_dock(current_dock);
+	_rome_update_header_actions();
+}
+
+void DockTabContainer::_rome_update_header_actions() {
+	if (!rome_float_button || !rome_close_button) {
+		return;
+	}
+	EditorDock *dock = get_current_tab() >= 0 ? get_dock(get_current_tab()) : nullptr;
+	const bool can_close = dock && (dock->is_global() || dock->is_closable());
+	const bool can_float = dock && EditorNode::get_singleton()->is_multi_window_enabled() && (dock->get_available_layouts() & EditorDock::DOCK_LAYOUT_FLOATING);
+	rome_close_button->set_disabled(!can_close);
+	rome_float_button->set_disabled(!can_float);
+	rome_close_button->set_tooltip_text(can_close ? "Cerrar panel" : "Este panel no se puede cerrar");
+	rome_float_button->set_tooltip_text(can_float ? "Separar panel en una ventana" : "Este panel no admite una ventana independiente");
+}
+
+void DockTabContainer::_rome_header_action(bool p_float) {
+	// Resolve the selected dock at activation time. Reordering or closing another
+	// tab must not leave a cached pointer targeting the previous tab.
+	EditorDock *dock = get_current_tab() >= 0 ? get_dock(get_current_tab()) : nullptr;
+	if (!dock) {
+		return;
+	}
+	if (p_float) {
+		if (EditorNode::get_singleton()->is_multi_window_enabled() && (dock->get_available_layouts() & EditorDock::DOCK_LAYOUT_FLOATING)) {
+			EditorDockManager::get_singleton()->make_dock_floating(dock);
+		}
+	} else if (dock->is_global() || dock->is_closable()) {
+		EditorDockManager::get_singleton()->close_dock(dock);
+	}
+	_rome_update_header_actions();
 }
 
 void DockTabContainer::_notification(int p_what) {
 	if (p_what == NOTIFICATION_POSTINITIALIZE) {
 		connect("pre_popup_pressed", callable_mp(this, &DockTabContainer::_pre_popup).bind(Size2i()));
 		connect("child_order_changed", callable_mp(this, &DockTabContainer::update_visibility));
+		if (rome_float_button) {
+			connect("tab_changed", callable_mp(this, &DockTabContainer::_rome_update_header_actions).unbind(1));
+		}
+	} else if (p_what == NOTIFICATION_THEME_CHANGED && rome_float_button) {
+		rome_float_button->set_button_icon(get_editor_theme_icon(SNAME("MakeFloating")));
+		rome_close_button->set_button_icon(get_editor_theme_icon(SNAME("GuiClose")));
+	} else if (p_what == NOTIFICATION_VISIBILITY_CHANGED) {
+		_rome_update_header_actions();
 	}
 }
 
 void DockTabContainer::update_visibility() {
 	// Hide the dock container if there are no tabs.
 	set_visible(EditorDockManager::get_singleton()->are_docks_visible() && get_tab_count() > 0);
+	_rome_update_header_actions();
 }
 
 DockTabContainer::TabStyle DockTabContainer::get_tab_style() const {
@@ -303,11 +346,18 @@ void DockTabContainer::load_selected_tab(int p_idx) {
 	set_block_signals(true);
 	set_current_tab(p_idx);
 	set_block_signals(false);
+	_rome_update_header_actions();
 }
 
 void DockTabContainer::set_dock_context_popup(DockContextPopup *p_popup) {
 	dock_context_popup = p_popup;
 	set_popup(dock_context_popup);
+	if (rome_close_button) {
+		// Keep Close at the outer edge, after the native context-menu button.
+		Node *actions = rome_close_button->get_parent();
+		Node *header = actions->get_parent();
+		header->move_child(actions, header->get_child_count() - 1);
+	}
 }
 
 void DockTabContainer::move_dock_index(EditorDock *p_dock, int p_to_index, bool p_set_current) {
@@ -319,6 +369,7 @@ void DockTabContainer::move_dock_index(EditorDock *p_dock, int p_to_index, bool 
 		set_current_tab(target_index);
 	}
 	set_block_signals(false);
+	_rome_update_header_actions();
 }
 
 EditorDock *DockTabContainer::get_dock(int p_idx) const {
@@ -368,6 +419,42 @@ DockTabContainer::DockTabContainer(int p_slot) {
 	get_tab_bar()->set_switch_on_release(true);
 	get_tab_bar()->connect("tab_rmb_clicked", callable_mp(this, &DockTabContainer::_tab_rmb_clicked));
 	get_tab_bar()->connect("tab_clicked", callable_mp(this, &DockTabContainer::_tab_clicked).unbind(1));
+	if (p_slot != EditorDock::DOCK_SLOT_MAIN_SCREEN && bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false))) {
+		HBoxContainer *header = Object::cast_to<HBoxContainer>(get_tab_bar()->get_parent());
+		ERR_FAIL_NULL(header);
+		HBoxContainer *actions = memnew(HBoxContainer);
+		actions->set_name("ROMEDockHeaderActions");
+		actions->add_theme_constant_override("separation", 0);
+		header->add_child(actions);
+		rome_float_button = memnew(Button);
+		rome_close_button = memnew(Button);
+		rome_float_button->set_name("ROMEDockFloat");
+		rome_close_button->set_name("ROMEDockClose");
+		for (Button *button : { rome_float_button, rome_close_button }) {
+			button->set_custom_minimum_size(Size2(20, 20) * EDSCALE);
+			button->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+			button->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+			button->add_theme_constant_override("icon_max_width", 12 * EDSCALE);
+			Ref<StyleBoxFlat> normal = memnew(StyleBoxFlat);
+			normal->set_bg_color(Color(0, 0, 0, 0));
+			normal->set_content_margin_all(3 * EDSCALE);
+			Ref<StyleBoxFlat> hover = normal->duplicate();
+			hover->set_bg_color(Color::html("303139"));
+			hover->set_corner_radius_all(2 * EDSCALE);
+			button->add_theme_style_override("normal", normal);
+			button->add_theme_style_override("disabled", normal);
+			button->add_theme_style_override("hover", hover);
+			button->add_theme_style_override("pressed", hover);
+			button->add_theme_style_override("hover_pressed", hover);
+			button->add_theme_color_override("icon_normal_color", Color::html("c5c7d0"));
+			button->add_theme_color_override("icon_hover_color", Color::html("f0f0f3"));
+			button->add_theme_color_override("icon_pressed_color", Color::html("f0f0f3"));
+			actions->add_child(button);
+		}
+		rome_float_button->connect(SceneStringName(pressed), callable_mp(this, &DockTabContainer::_rome_header_action).bind(true));
+		rome_close_button->connect(SceneStringName(pressed), callable_mp(this, &DockTabContainer::_rome_header_action).bind(false));
+		_rome_update_header_actions();
+	}
 }
 
 Rect2 SideDockTabContainer::get_floating_dock_rect(EditorDock *p_dock) {
@@ -383,7 +470,8 @@ SideDockTabContainer::SideDockTabContainer(int p_slot, const Rect2i &p_slot_rect
 	grid_rect = p_slot_rect;
 	set_custom_minimum_size(Size2(170 * EDSCALE, 0));
 	// TabContainer's margin cache is initialized only after entering the tree.
-	callable_mp(static_cast<TabContainer *>(this), &TabContainer::set_tab_alignment).call_deferred(TabBar::ALIGNMENT_CENTER);
+	const bool studio = ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false);
+	callable_mp(static_cast<TabContainer *>(this), &TabContainer::set_tab_alignment).call_deferred(studio ? TabBar::ALIGNMENT_LEFT : TabBar::ALIGNMENT_CENTER);
 	set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	set_use_hidden_tabs_for_min_size(true);
 }

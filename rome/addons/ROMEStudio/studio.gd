@@ -25,19 +25,41 @@ class StudioInspector extends EditorInspectorPlugin:
 	var _shown: Dictionary = {}
 	func _can_handle(object: Object) -> bool:
 		var root := EditorInterface.get_edited_scene_root()
-		if not ProjectSettings.get_setting("rome/studio/enabled", false) or not object is Node or root == null or not (object == root or root.is_ancestor_of(object)):
+		if not ProjectSettings.get_setting("rome/studio/enabled", false) or root == null:
 			return false
-		if object.is_class("RobloxGame3D") or object.is_class("RobloxGame2D") or object.is_class("RobloxTerrain"):
+		var nodes := inspected_nodes(object)
+		if nodes.is_empty():
 			return false
-		return ClassDB.class_get_api_type(object.get_class()) in [ClassDB.API_EXTENSION, ClassDB.API_EDITOR_EXTENSION]
+		for node in nodes:
+			if not (node == root or root.is_ancestor_of(node)) or node is Node2D:
+				return false # Preserve the complete native 2D resource/physics inspectors.
+			if node.is_class("RobloxGame3D") or node.is_class("RobloxGame2D") or node.is_class("RobloxTerrain"):
+				return false
+			if not ClassDB.class_get_api_type(node.get_class()) in [ClassDB.API_EXTENSION, ClassDB.API_EDITOR_EXTENSION]:
+				return false
+		return true
+	static func inspected_nodes(object: Object) -> Array[Node]:
+		var nodes: Array[Node] = []
+		if object is Node:
+			nodes.append(object)
+		elif object.is_class("MultiNodeEdit") and object.has_method("get_node_count"):
+			var root := EditorInterface.get_edited_scene_root()
+			if root == null:
+				return nodes
+			for index in int(object.call("get_node_count")):
+				var node := root.get_node_or_null(object.call("get_node", index))
+				if node == null:
+					return []
+				nodes.append(node)
+		return nodes
 	func _parse_begin(object: Object) -> void:
-		var grid := PropertyGrid.new(object as Node, inspector_filter())
+		var grid := PropertyGrid.new(object, inspector_filter(), inspected_nodes(object))
 		_shown = grid.shown
 		add_property_editor_for_multiple_properties("", PackedStringArray(_shown.keys()), grid)
 	func _parse_property(_object: Object, _type: Variant.Type, name: String, _hint: PropertyHint, _hint_string: String, _usage: int, _wide: bool) -> bool:
-		if name == "codigo_luau":
+		if name == "codigo_luau" and not _object.is_class("MultiNodeEdit"):
 			return false
-		if _shown.has(name) or name.begins_with("metadata/"):
+		if _shown.has(name) or name.begins_with("metadata/") or name.begins_with("Metadata/"):
 			return true
 		return name.is_empty() or name[0] != name[0].to_upper()
 	## Text of the Inspector dock's property filter.
@@ -59,7 +81,7 @@ func _enter_tree() -> void:
 	add_dock(_resources)
 	var editor_settings := EditorInterface.get_editor_settings()
 	if not editor_settings.get_project_metadata("rome", "resources_initialized", false):
-		_resources.call_deferred("close")
+		_resources.call_deferred("make_visible")
 		editor_settings.set_project_metadata("rome", "resources_initialized", true)
 	if _editor_node.has_signal("rome_insert_object"):
 		_editor_node.connect("rome_insert_object", _insert_object)
@@ -93,6 +115,9 @@ func _scene_changed(root: Node) -> void:
 	if is_instance_valid(_resources):
 		_resources.call_deferred("refresh")
 	_services.attach(root)
+	if root != null and root.is_class("RobloxGame2D") and not _view_initialized:
+		_view_initialized = true
+		call_deferred("_prepare_2d_view", weakref(root))
 	if root != null and root.is_class("RobloxGame3D"):
 		call_deferred("_ensure_spawn_symbols", root)
 	if root != null and root.is_class("RobloxGame3D") and not _view_initialized:
@@ -102,6 +127,11 @@ func _scene_changed(root: Node) -> void:
 		return
 	_pending_root = root
 	call_deferred("_prepare_template")
+
+func _prepare_2d_view(reference: WeakRef) -> void:
+	await get_tree().process_frame
+	if reference.get_ref() == EditorInterface.get_edited_scene_root():
+		EditorInterface.set_main_screen_editor("2D")
 
 func _prepare_studio_view() -> void:
 	if DisplayServer.get_name() == "headless":
@@ -149,6 +179,12 @@ func _prepare_template() -> void:
 	if workspace == null:
 		return
 	var kind := str(root.get_meta("rome_template", "baseplate"))
+	if kind == "2d":
+		preload("res://addons/ROMEStudio/studio_2d.gd").build(root, false)
+		_finish_template(root)
+		return
+	if kind == "mixed":
+		preload("res://addons/ROMEStudio/studio_2d.gd").build(root, true)
 	var floor_node := workspace.get_node_or_null("Baseplate")
 	var sun := workspace.get_node_or_null("SunLight") as DirectionalLight3D
 	if sun != null:
@@ -186,11 +222,19 @@ func _prepare_template() -> void:
 			piece.set("Size", Vector3(14, 10 + i * 4, 14))
 			piece.set("Color", Color("9b8060"))
 			piece.position = Vector3((i % 2) * 35 - 18, (10 + i * 4) * 0.5, (i / 2) * 35 - 18)
+	_finish_template(root)
+
+func _finish_template(root: Node) -> void:
 	root.set_meta("rome_template_built", true)
 	for service in root.get_children():
 		service.set_display_folded(true)
 	EditorInterface.mark_scene_as_unsaved()
-	if DisplayServer.get_name() == "headless":
+	# Saving displays a native progress dialog. Leave the deferred message flush
+	# before opening it; also retain the actual template if the creator switches tabs.
+	await get_tree().process_frame
+	if not is_instance_valid(root):
+		return
+	if DisplayServer.get_name() == "headless" or root != EditorInterface.get_edited_scene_root():
 		var packed := PackedScene.new()
 		packed.pack(root)
 		ResourceSaver.save(packed, root.scene_file_path)
@@ -360,6 +404,10 @@ func _describe_destination(title: String) -> String:
 		return ""
 	var selection := EditorInterface.get_selection().get_selected_nodes()
 	var parent := _destination(entry, selection[0] if not selection.is_empty() else null, root)
+	if parent == null and entry.kind == "world_2d":
+		return "Workspace / World2D (nuevo)"
+	if parent == null and entry.kind in ["collision_2d", "path_follow_2d"]:
+		return "selecciona un cuerpo físico 2D" if entry.kind == "collision_2d" else "selecciona un Path2D"
 	if parent == null and entry.kind == "gui":
 		parent = _screen_gui(root)
 		if parent == null:
@@ -389,7 +437,19 @@ func _insert_entry(entry: Dictionary, shape := -1) -> Node:
 	elif object.is_class("Part"):
 		object.set("Shape", maxi(shape, 0))
 		object.set("Size", PART_SIZES[maxi(shape, 0)])
+	Placement.initialize_2d(object)
+	return _insert_instance(object, entry, parent, root)
+
+func _insert_instance(object: Node, entry: Dictionary, parent: Node, root: Node) -> Node:
+	if parent == null and entry.kind in ["collision_2d", "path_follow_2d"]:
+		object.free()
+		return null
 	var top := object
+	if parent == null and entry.kind == "world_2d":
+		top = Node2D.new()
+		top.name = _unique_name("World2D", _child_names(root.get_node_or_null("Workspace") if root.has_node("Workspace") else root))
+		top.add_child(object)
+		parent = root.get_node_or_null("Workspace") if root.has_node("Workspace") else root
 	if parent == null and entry.kind == "gui":
 		parent = _screen_gui(root)
 		if parent == null and root.has_node("StarterGui") and ClassDB.can_instantiate("ScreenGui"):
@@ -400,8 +460,10 @@ func _insert_entry(entry: Dictionary, shape := -1) -> Node:
 	if parent == null:
 		parent = root
 	var workspace := root.get_node_or_null("Workspace")
-	if top is Node3D and _placeable(top) and workspace != null and (parent == workspace or workspace.is_ancestor_of(parent)):
+	if top is Node3D and (_placeable(top) or entry.get("resource_scene", false)) and workspace != null and (parent == workspace or workspace.is_ancestor_of(parent)):
 		Placement.place(top as Node3D, parent, root)
+	if object is Node2D and entry.kind == "world_2d":
+		Placement.place_2d(object, top if top != object else parent)
 	var undo := get_undo_redo()
 	undo.create_action("Insertar " + str(entry.name), UndoRedo.MERGE_DISABLE, root)
 	undo.add_do_method(parent, "add_child", top, true)
@@ -414,8 +476,22 @@ func _insert_entry(entry: Dictionary, shape := -1) -> Node:
 	_select_nodes([object])
 	EditorInterface.edit_node(object)
 	EditorInterface.mark_scene_as_unsaved()
-	InsertDialog.remember(str(entry.name))
+	if Catalog.entries().has(str(entry.name)):
+		InsertDialog.remember(str(entry.name))
 	return object
+
+func insert_resource_scene(path: String) -> Node:
+	var root := EditorInterface.get_edited_scene_root()
+	if root == null or path == root.scene_file_path:
+		return null
+	var packed := load(path) as PackedScene
+	if packed == null or not packed.can_instantiate() or packed.get_state().get_node_type(0) in ["Game3D", "RobloxGame3D", "Game2D", "RobloxGame2D"]:
+		return null
+	var object := packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
+	var kind := "collision_2d" if object is CollisionShape2D or object is CollisionPolygon2D else "path_follow_2d" if object is PathFollow2D else "world_2d" if object is Node2D else "gui_native" if object is Control else "world" if object is Node3D else "generic"
+	var entry := {"name": str(object.name), "resource_scene": true, "kind": kind}
+	var selection := EditorInterface.get_selection().get_selected_nodes()
+	return _insert_instance(object, entry, _destination(entry, selection[0] if not selection.is_empty() else null, root), root)
 
 func _placeable(node: Node) -> bool:
 	return node.is_class("RobloxPart") or node.is_class("RobloxPlayer") or node.is_class("RobloxTool") or (node.is_class("RBXModel") and not node.is_class("WorldModel"))
@@ -431,10 +507,28 @@ func _screen_gui(root: Node) -> Node:
 ## Studio's destination rules; null for a GUI object means "inside a ScreenGui".
 func _destination(entry: Dictionary, selected: Node, root: Node) -> Node:
 	var chosen: Node = selected if selected != null and selected != root and root.is_ancestor_of(selected) else null
-	var type: String = entry.type
+	var type: String = entry.get("type", "")
 	match str(entry.kind):
+		"world_2d":
+			return _world_2d_destination(chosen, root)
+		"collision_2d", "path_follow_2d":
+			if chosen == null:
+				chosen = root
+			while chosen != null:
+				if (entry.kind == "collision_2d" and chosen is CollisionObject2D) or (entry.kind == "path_follow_2d" and chosen is Path2D):
+					return chosen
+				if chosen == root:
+					break
+				chosen = chosen.get_parent()
+			return null
+		"viewport":
+			return chosen if chosen != null else root
+		"gui_native":
+			if chosen is Control or chosen is CanvasLayer or chosen is SubViewport or (chosen != null and chosen.is_class("ScreenGui")):
+				return chosen
+			return root.get_node_or_null("StarterGui") if root.has_node("StarterGui") else root
 		"world", "attach":
-			if chosen != null and (chosen is Node3D or chosen.is_class("Folder") or (chosen.get_parent() == root and str(chosen.name) in STORAGE)):
+			if chosen != null and (chosen is Node3D or chosen is SubViewport or chosen.is_class("Folder") or (chosen.get_parent() == root and str(chosen.name) in STORAGE)):
 				return chosen
 			return root.get_node_or_null("Workspace")
 		"script":
@@ -473,6 +567,18 @@ func _destination(entry: Dictionary, selected: Node, root: Node) -> Node:
 			return service
 	return chosen if chosen != null else root.get_node_or_null("Workspace")
 
+func _world_2d_destination(chosen: Node, root: Node) -> Node:
+	if chosen is Node2D or chosen is SubViewport:
+		return chosen
+	var workspace := root.get_node_or_null("Workspace")
+	if workspace is Node2D:
+		return workspace
+	if workspace != null:
+		var world := workspace.get_node_or_null("World2D")
+		if world is Node2D:
+			return world
+	return root if root is Node2D else null
+
 ## Top-level selected nodes in tree order, without the root, services or nodes
 ## that belong to an instanced scene.
 func _top_level(selection: Array[Node]) -> Array[Node]:
@@ -500,10 +606,16 @@ func _is_service(node: Node, root: Node) -> bool:
 func _group_selection(selection: Array[Node], container_type: String, title: String) -> void:
 	var root := EditorInterface.get_edited_scene_root()
 	var nodes := _top_level(selection)
+	var group_2d := container_type == "RBXModel" and not nodes.is_empty() and nodes.all(func(node: Node) -> bool: return node is Node2D)
+	if group_2d:
+		container_type = "Node2D"
+		title = "Group2D"
 	if nodes.is_empty() or not ClassDB.can_instantiate(container_type):
 		return
 	var parent := nodes[0].get_parent()
 	var group := ClassDB.instantiate(container_type) as Node
+	if group_2d:
+		group.set_meta("rome_2d_group", true)
 	group.name = _unique_name(title, _child_names(parent))
 	var inside := {}
 	var moves := []
@@ -529,7 +641,7 @@ func _ungroup_selection(selection: Array[Node]) -> void:
 	var root := EditorInterface.get_edited_scene_root()
 	var containers: Array[Node] = []
 	for node in _top_level(selection):
-		if (node.is_class("RBXModel") or node.is_class("Folder")) and node.scene_file_path.is_empty():
+		if (node.is_class("RBXModel") or node.is_class("Folder") or node.get_meta("rome_2d_group", false)) and node.scene_file_path.is_empty():
 			containers.append(node)
 	if containers.is_empty():
 		return

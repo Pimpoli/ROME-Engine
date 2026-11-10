@@ -381,7 +381,7 @@ void DocumentList::_show_context_menu() {
 
 		if (document_editor_container->is_main_editor && script.is_valid() && script->is_tool()) {
 			context_menu->add_shortcut(ED_GET_SHORTCUT("script_editor/reload_script_soft"), DocumentEditorContainer::FILE_MENU_SOFT_RELOAD_TOOL);
-			context_menu->add_shortcut(ED_GET_SHORTCUT("script_editor/run_file"), DocumentEditorContainer::FILE_MENU_RUN);
+			context_menu->add_shortcut(ED_GET_SHORTCUT(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? "rome/run_editor_script" : "script_editor/run_file"), DocumentEditorContainer::FILE_MENU_RUN);
 			context_menu->add_separator();
 		}
 
@@ -4066,6 +4066,7 @@ DocumentEditorContainer::DocumentEditorContainer(bool p_is_main_editor, const St
 
 	ED_SHORTCUT("script_editor/reload_script_soft", TTRC("Soft Reload Tool Script"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::ALT | Key::R);
 	ED_SHORTCUT("script_editor/run_file", TTRC("Run"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::SHIFT | Key::X);
+	ED_SHORTCUT("rome/run_editor_script", TTRC("Run Editor Script"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::ALT | KeyModifierMask::SHIFT | Key::X);
 
 	ED_SHORTCUT("script_editor/copy_path", TTRC("Copy File Path"));
 	ED_SHORTCUT("script_editor/copy_uid", TTRC("Copy File UID"));
@@ -4165,7 +4166,7 @@ DocumentEditorContainer::DocumentEditorContainer(bool p_is_main_editor, const St
 	file_menu->get_popup()->add_separator();
 	if (is_main_editor) {
 		file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/reload_script_soft"), FILE_MENU_SOFT_RELOAD_TOOL);
-		file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/run_file"), FILE_MENU_RUN);
+		file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT(bool(ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false)) ? "rome/run_editor_script" : "script_editor/run_file"), FILE_MENU_RUN);
 		file_menu->get_popup()->add_separator();
 	}
 	file_menu->get_popup()->add_submenu_node_item(TTRC("Theme"), theme_submenu, FILE_MENU_THEME_SUBMENU);

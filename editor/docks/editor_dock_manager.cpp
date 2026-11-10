@@ -30,6 +30,7 @@
 
 #include "editor_dock_manager.h"
 
+#include "core/config/project_settings.h"
 #include "core/object/callable_mp.h"
 #include "editor/docks/dock_tab_container.h"
 #include "editor/docks/editor_dock.h"
@@ -291,7 +292,8 @@ void EditorDockManager::_open_dock_in_window(EditorDock *p_dock, bool p_show_win
 	Point2 dock_screen_pos = floating_rect.position;
 
 	WindowWrapper *wrapper = memnew(WindowWrapper);
-	wrapper->set_window_title(vformat(TTR("%s - Godot Engine"), TTR(p_dock->get_display_title())));
+	const bool rome = ProjectSettings::get_singleton()->get_setting("rome/studio/enabled", false);
+	wrapper->set_window_title(vformat(rome ? TTR("%s - ROME Engine") : TTR("%s - Godot Engine"), TTR(p_dock->get_display_title())));
 	wrapper->set_margins_enabled(true);
 
 	EditorNode::get_singleton()->get_gui_base()->add_child(wrapper);
@@ -708,6 +710,23 @@ void EditorDockManager::open_dock(EditorDock *p_dock, bool p_set_current) {
 		return;
 	}
 
+	_update_layout();
+}
+
+void EditorDockManager::move_dock_to_slot(EditorDock *p_dock, EditorDock::DockSlot p_slot) {
+	ERR_FAIL_NULL(p_dock);
+	ERR_FAIL_COND(!all_docks.has(p_dock));
+	DockTabContainer *target = get_dock_container(p_slot);
+	ERR_FAIL_NULL(target);
+	ERR_FAIL_COND(!(p_dock->get_available_layouts() & target->layout));
+	if (!p_dock->enabled) {
+		return;
+	}
+	if (!p_dock->is_open) {
+		p_dock->emit_signal(SNAME("opened"));
+	}
+	p_dock->is_open = true;
+	_move_dock(p_dock, target, 0, target->can_switch_dock());
 	_update_layout();
 }
 

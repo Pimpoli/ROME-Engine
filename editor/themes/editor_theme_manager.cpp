@@ -250,15 +250,40 @@ Ref<EditorTheme> EditorThemeManager::_create_base_theme(const Ref<EditorTheme> &
 		theme->set_stylebox("panel", "TabContainerOdd", panel);
 		theme->set_stylebox("panel", "Tree", flat(surface, 4, 2));
 		theme->set_stylebox("panel", "ItemList", flat(surface, 4, 2));
-		for (const StringName &type : { StringName("TabBar"), StringName("TabContainer") }) {
-			Ref<StyleBoxFlat> selected = flat(Color::html("24252c"), 10, 3);
-			selected->set_border_width(SIDE_BOTTOM, EDSCALE);
-			selected->set_border_color(Color::html("5277ff"));
-			theme->set_stylebox("tab_selected", type, selected);
+		// Dock headers stay neutral; the document strip alone carries the accent.
+		// TabContainer copies its tab styles to its internal TabBar, and Odd and
+		// BottomPanel have explicit modern-theme overrides that must be replaced.
+		Ref<StyleBoxFlat> header = flat(surface, 0, 0);
+		header->set_border_width(SIDE_BOTTOM, EDSCALE);
+		header->set_border_color(line);
+		for (const StringName &type : { StringName("TabContainer"), StringName("TabContainerOdd"), StringName("BottomPanel") }) {
+			theme->set_stylebox("tabbar_background", type, header);
+			theme->set_stylebox("tab_selected", type, flat(Color::html("24252c"), 10, 3));
 			theme->set_stylebox("tab_unselected", type, flat(surface, 10, 3));
 			theme->set_stylebox("tab_hovered", type, flat(Color::html("2b2d36"), 10, 3));
 			theme->set_color("font_selected_color", type, text);
+			theme->set_color("font_unselected_color", type, text);
+			theme->set_color("font_hovered_color", type, Color::html("f2f3f5"));
 		}
+		Ref<StyleBoxFlat> document_selected = flat(Color::html("24252c"), 10, 3);
+		document_selected->set_border_width(SIDE_BOTTOM, EDSCALE);
+		document_selected->set_border_color(Color::html("5277ff"));
+		theme->set_stylebox("tab_selected", "TabBar", document_selected);
+		theme->set_stylebox("tab_unselected", "TabBar", flat(surface, 10, 3));
+		theme->set_stylebox("tab_hovered", "TabBar", flat(Color::html("2b2d36"), 10, 3));
+		theme->set_color("font_selected_color", "TabBar", text);
+		theme->set_color("font_unselected_color", "TabBar", Color::html("a7a8b0"));
+		// Output's filter/clear/pin controls use a separate variation from Button.
+		theme->set_stylebox("normal", "BottomPanelButton", flat(surface, 6, 3));
+		theme->set_stylebox("hover", "BottomPanelButton", flat(Color::html("2b2d36"), 6, 3));
+		theme->set_stylebox("pressed", "BottomPanelButton", flat(Color::html("303139"), 6, 3));
+		theme->set_stylebox("hover_pressed", "BottomPanelButton", flat(Color::html("393b43"), 6, 3));
+		theme->set_color("font_color", "BottomPanelButton", text);
+		theme->set_color("font_hover_color", "BottomPanelButton", Color::html("f2f3f5"));
+		theme->set_color("font_pressed_color", "BottomPanelButton", text);
+		theme->set_color("font_hover_pressed_color", "BottomPanelButton", Color::html("f2f3f5"));
+		theme->set_color("icon_pressed_color", "BottomPanelButton", Color(1, 1, 1));
+		theme->set_color("icon_hover_pressed_color", "BottomPanelButton", Color(1, 1, 1));
 		Ref<StyleBoxFlat> input = flat(Color::html("121318"), 6, 3);
 		input->set_border_width_all(EDSCALE);
 		input->set_border_color(line);

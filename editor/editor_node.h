@@ -60,6 +60,7 @@ class OptionButton;
 class Panel;
 class PanelContainer;
 class RichTextLabel;
+class ScrollContainer;
 class SubViewport;
 class TextureProgressBar;
 class Timer;
@@ -85,6 +86,7 @@ class EditorAbout;
 class EditorBuildProfileManager;
 class EditorBottomPanel;
 class EditorCommandPalette;
+class EditorDock;
 class EditorDockManager;
 class EditorExport;
 class EditorExportPreset;
@@ -212,6 +214,7 @@ public:
 		LAYOUT_SAVE,
 		LAYOUT_DELETE,
 		LAYOUT_DEFAULT,
+		LAYOUT_ROME_STUDIO,
 
 		// Help menu.
 		HELP_SEARCH,
@@ -325,12 +328,49 @@ private:
 	};
 	HashMap<String, Vector<RomeToolMenuItem>> rome_tool_menus;
 	HashSet<String> rome_selection_tools;
+	HashMap<ObjectID, String> rome_scene_views;
+	int rome_next_scene_dimension = 0;
+	Button *rome_workspace_2d = nullptr;
+	Button *rome_workspace_3d = nullptr;
+	void _rome_workspace_changed(int p_tab);
+	void _rome_set_workspace(const String &p_view);
+	int _rome_new_component_scene_with_dimension(const String &p_dimension);
 	bool rome_snap_enabled[2] = {};
 	double rome_snap_step[2] = { 1.0, 40.0 };
 	Vector<Button *> rome_ribbon_tabs;
 	Ref<ButtonGroup> rome_ribbon_group;
 	HBoxContainer *rome_tabs_row = nullptr;
 	HBoxContainer *rome_pages_row = nullptr;
+	PanelContainer *rome_toolbar = nullptr;
+	ScrollContainer *rome_toolbar_scroll = nullptr;
+	PanelContainer *rome_toolbar_tools_panel = nullptr;
+	HBoxContainer *rome_toolbar_tools_row = nullptr;
+	Button *rome_toolbar_back = nullptr;
+	Button *rome_toolbar_next = nullptr;
+	bool rome_toolbar_overflow_update_pending = false;
+	void _rome_queue_toolbar_overflow_update();
+	void _rome_update_toolbar_overflow();
+	void _rome_scroll_toolbar(int p_direction);
+	PopupMenu *rome_toolbar_menu = nullptr;
+	Timer *rome_toolbar_hover_timer = nullptr;
+	bool rome_toolbar_compact = false;
+	bool rome_toolbar_labels = true;
+	bool rome_toolbar_collapsed = false;
+	bool rome_tabs_left_aligned = false;
+	Callable rome_fit_tabs;
+	void _rome_fit_tab_strip(HBoxContainer *p_mezzanine, Control *p_left_gap, Control *p_right_gap, ScrollContainer *p_tabs);
+	bool rome_toolbar_revealed = false;
+	void _rome_init_toolbar_appearance(Control *p_header);
+	Dictionary _rome_get_toolbar_options() const;
+	void _rome_set_toolbar_options(const Dictionary &p_options);
+	void _rome_apply_toolbar_options();
+	void _rome_style_toolbar_controls(Control *p_root);
+	void _rome_style_ribbon_button(Button *p_button, bool p_tab = false);
+	void _rome_toolbar_menu_selected(int p_id);
+	void _rome_toolbar_context(const Ref<InputEvent> &p_event);
+	void _rome_connect_toolbar_tabs();
+	void _rome_toolbar_tab_hovered(int p_tab);
+	void _rome_poll_toolbar_hover();
 	Array rome_custom_tabs;
 	ConfirmationDialog *rome_new_tab_dialog = nullptr;
 	LineEdit *rome_new_tab_name = nullptr;
@@ -362,6 +402,10 @@ private:
 	void _rome_ribbon_tab_changed(int p_tab);
 	void _rome_edit_menu(int p_id);
 	void _rome_view_menu(int p_id);
+	EditorDock *_rome_get_quick_dock(int p_id) const;
+	void _rome_panel_menu_opened(PopupMenu *p_menu);
+	void _rome_panel_menu_selected(int p_id, PopupMenu *p_menu);
+	void _rome_apply_studio_layout();
 	void _rome_editor_action(const String &p_action);
 	void _rome_color_changed(const Color &p_color);
 	void _rome_material_changed(int p_material);
@@ -983,6 +1027,7 @@ public:
 	void set_preview_locale(const String &p_locale, bool p_pseudolocalization);
 
 	int new_scene();
+	String rome_get_scene_view();
 	Error load_scene(const String &p_scene, bool p_ignore_broken_deps = false, bool p_set_inherited = false, bool p_force_open_imported = false, bool p_update_tabs = true);
 	Error open_scene(const String &p_scene, bool p_ignore_broken_deps = false, bool p_set_inherited = false, bool p_force_open_imported = false);
 	Error load_resource(const String &p_resource, bool p_ignore_broken_deps = false);
