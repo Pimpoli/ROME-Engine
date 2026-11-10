@@ -177,11 +177,16 @@ func _ready() -> void:
 	if not _allowed_folder(_folder):
 		_folder = "res://"
 	_ensure_default_folders()
+	refresh()
+	set_view(str(settings.get_project_metadata("rome", "resource_view", "tree")), false)
+
+# Opening, closing or moving the dock takes it out of the tree and back in.
+func _enter_tree() -> void:
 	var filesystem := EditorInterface.get_resource_filesystem()
 	if not filesystem.filesystem_changed.is_connected(_queue_refresh):
 		filesystem.filesystem_changed.connect(_queue_refresh)
-	refresh()
-	set_view(str(settings.get_project_metadata("rome", "resource_view", "tree")), false)
+	if is_node_ready():
+		_queue_refresh.call_deferred()
 
 func _exit_tree() -> void:
 	_preview_generation += 1

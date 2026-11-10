@@ -24,6 +24,17 @@ static func run(root: Node) -> Dictionary:
 	_expect(str(panel.get("object_title").text).begins_with("2 objetos"), "Multi-property header identifies the selected object count", report)
 	_expect(panel.rows.Color.get_text(1) == "—" and panel.rows.position.get_text(1) == "—" and panel.rows.Anchored.is_indeterminate(1), "Mixed colors, positions and booleans are displayed as mixed values", report)
 	_expect(not panel.add_button.visible and not panel.sections.has("Atributos"), "Multi-selection does not offer single-object attribute mutations", report)
+	# Open the mixed Name and confirm it without typing, as Enter or a click outside would.
+	panel.table.set_selected(panel.rows.name, 1)
+	panel.table.edit_selected(true)
+	await _frames(2)
+	var confirmed := false
+	for editor: LineEdit in panel.table.find_children("*", "LineEdit", true, false):
+		if editor.is_visible_in_tree():
+			confirmed = true
+			editor.text_submitted.emit(editor.text)
+	await _frames(3)
+	_expect(confirmed and first.name == "First" and second.name == "Second", "Confirming a mixed Name without typing keeps each object's name", report)
 	panel.commit("Transparency", 0.5)
 	await _frames(3)
 	_expect(is_equal_approx(first.get("Transparency"), 0.5) and is_equal_approx(second.get("Transparency"), 0.5), "One property edit changes both selected Parts", report)

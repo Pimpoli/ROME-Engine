@@ -5,6 +5,15 @@ static func run(root: Node) -> Dictionary:
 	var resources := EditorInterface.get_base_control().find_child("ROMEAssets", true, false)
 	if not _expect(resources != null and resources.has_method("set_view"), "Resources offers tree and thumbnail views", report):
 		return report
+	# Closing and reopening the dock takes it out of the tree and back in.
+	var shown: bool = resources.is_visible_in_tree()
+	resources.close()
+	await _frames(2)
+	resources.open()
+	if shown:
+		resources.make_visible()
+	await _frames(3)
+	_expect(EditorInterface.get_resource_filesystem().filesystem_changed.is_connected(Callable(resources, "_queue_refresh")), "Resources keeps listening to disk changes after its dock is closed and reopened", report)
 	var previous_view: String = resources.get("_view")
 	var previous_folder: String = resources.get("_folder")
 	var previous_search: String = resources.search.text

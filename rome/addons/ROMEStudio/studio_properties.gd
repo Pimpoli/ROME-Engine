@@ -486,6 +486,10 @@ func _edited() -> void:
 	if int(meta.type) == TYPE_COLOR:
 		_open_color(meta.property)
 		return
+	# Confirming a mixed value without typing must not write the dash into every object.
+	if row.get_text(1).strip_edges() == "—" and _mixed(meta.property, meta.get("indices", [])):
+		call_deferred("_update_property")
+		return
 	var value: Variant = _parse(row, meta)
 	if value == null:
 		call_deferred("_update_property")

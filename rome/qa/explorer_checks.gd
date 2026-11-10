@@ -172,6 +172,15 @@ static func _picker_checks(native: Node, report: Dictionary) -> void:
 	_expect(insert_dialog == null or not insert_dialog.visible, "An insert click inside a node picker is ignored", report)
 	dialog.hide()
 	await _frames(2)
+	# The same hover on the Explorer, where the button belongs.
+	var explorer: Tree = native.find_children("*", "SceneTreeEditor", true, false)[0].find_children("*", "Tree", true, false)[0]
+	row = _row(explorer.get_root(), "Workspace")
+	explorer.scroll_to_item(row)
+	await _frames(2)
+	motion.position = explorer.get_item_area_rect(row, 0).get_center()
+	explorer.gui_input.emit(motion)
+	_expect(row.get_button_by_id(0, 10) >= 0, "Hovering an Explorer row still offers its insert button", report)
+	explorer.mouse_exited.emit()
 
 static func _node(type: String, title: String, parent: Node, root: Node) -> Node:
 	var node: Node = ClassDB.instantiate(type)
