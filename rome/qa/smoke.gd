@@ -6,7 +6,14 @@ var _native: Node
 var _custom_tab := -1
 
 func _enter_tree() -> void:
+	_save_result(false)
 	call_deferred("_run")
+
+# A run that breaks halfway leaves "passed": false, not the result of an older run.
+func _save_result(passed: bool, failed := "") -> void:
+	var report := FileAccess.open("res://integration-result.json", FileAccess.WRITE)
+	report.store_string(JSON.stringify({"passed": passed, "failed": failed, "checks": checks}, "  "))
+	report.close()
 
 func _check(value: bool, label: String) -> bool:
 	if not value:
@@ -14,6 +21,7 @@ func _check(value: bool, label: String) -> bool:
 			_native.call("rome_remove_custom_tab", _custom_tab)
 			_custom_tab = -1
 		push_error("ROME integration: " + label)
+		_save_result(false, label)
 		get_tree().quit(1)
 		return false
 	checks.append(label)
@@ -114,8 +122,12 @@ func _run() -> void:
 		return
 	root.add_child(original_storage, true)
 	original_storage.owner = root
-	await get_tree().process_frame
-	await get_tree().process_frame
+	for attempt in 30:
+		await get_tree().process_frame
+		if root.get_node_or_null("ReplicatedStorage") == original_storage:
+			break
+	if root.get_node_or_null("ReplicatedStorage") != original_storage:
+		print("ROME service restore diagnostic: ", original_storage.name, " parent=", original_storage.get_parent(), " queued=", original_storage.is_queued_for_deletion(), " children=", root.get_children().map(func(node: Node) -> String: return str(node.name) + ":" + str(node.has_meta("rome_recreated_service"))))
 	if not _check(root.get_node("ReplicatedStorage") == original_storage, "Restoring an original service removes its temporary replacement"):
 		return
 	original_storage.name = "RenamedStorage"
@@ -194,10 +206,12 @@ func _run() -> void:
 		return
 	if not _check(int(resources.call("create_folder", "../Invalid", "res://Scenes")) == ERR_INVALID_PARAMETER, "Resource folder validation rejects paths"):
 		return
+	print("QA section: doc_report")
 	var doc_report: Dictionary = await preload("res://addons/ROMESmoke/document_tabs_checks.gd").run(root)
 	if not _check(doc_report.errors.is_empty(), "Unified document tabs: " + str(doc_report.errors)):
 		return
 	checks.append_array(doc_report.checks)
+	print("QA section: ribbon")
 	var ribbon: Dictionary = await preload("res://addons/ROMESmoke/ribbon_checks.gd").run(native, root)
 	if not _check(ribbon.errors.is_empty(), "Studio ribbon dropdowns, snapping and shortcuts: " + str(ribbon.errors)):
 		return
@@ -211,10 +225,61 @@ func _run() -> void:
 	var identity: String = FileAccess.get_file_as_string(manifest).sha256_text().left(12) if FileAccess.file_exists(manifest) else ""
 	if not _check(stamp is Dictionary and str(stamp.get("identity", "")).length() == 12 and (identity.is_empty() or stamp.identity == identity), "Opening the experience records its runtime in .rome/runtime.json"):
 		return
+	print("QA section: panels")
 	var panels: Dictionary = await preload("res://addons/ROMESmoke/studio_panels_checks.gd").run(root)
 	if not _check(panels.has("errors") and panels.errors.is_empty(), "Studio panels, insertion and properties: " + str(panels.get("errors", "la prueba se detuvo"))):
 		return
 	checks.append_array(panels.checks)
+	print("QA section: appearance")
+	var appearance: Dictionary = await preload("res://addons/ROMESmoke/toolbar_appearance_checks.gd").run(native)
+	if not _check(appearance.get("completed", false) and appearance.errors.is_empty(), "Toolbar appearance and persistence: " + str(appearance.errors)):
+		return
+	checks.append_array(appearance.checks)
+	print("QA section: overflow")
+	var overflow: Dictionary = await preload("res://addons/ROMESmoke/ribbon_overflow_checks.gd").run(native)
+	if not _check(overflow.get("completed", false) and overflow.errors.is_empty(), "Ribbon overflow and responsive layout: " + str(overflow.errors)):
+		return
+	checks.append_array(overflow.checks)
+	print("QA section: dock_headers")
+	var dock_headers: Dictionary = await preload("res://addons/ROMESmoke/dock_header_checks.gd").run(native)
+	if not _check(dock_headers.get("completed", false) and dock_headers.errors.is_empty(), "Dock quick actions and restoration: " + str(dock_headers.errors)):
+		return
+	checks.append_array(dock_headers.checks)
+	print("QA section: explorer")
+	var explorer: Dictionary = await preload("res://addons/ROMESmoke/explorer_checks.gd").run(root)
+	if not _check(explorer.get("completed", false) and explorer.errors.is_empty(), "Explorer search, shortcuts and organization: " + str(explorer.errors)):
+		return
+	checks.append_array(explorer.checks)
+	print("QA section: comfort")
+	var comfort: Dictionary = await preload("res://addons/ROMESmoke/comfort_checks.gd").run(root)
+	if not _check(comfort.get("completed", false) and comfort.errors.is_empty(), "Continuous drag and resource comfort: " + str(comfort.errors)):
+		return
+	checks.append_array(comfort.checks)
+	print("QA section: scroll_zoom")
+	var scroll_zoom: Dictionary = await preload("res://addons/ROMESmoke/scroll_zoom_checks.gd").run(root)
+	if not _check(scroll_zoom.get("completed", false) and scroll_zoom.errors.is_empty(), "Continuous wheel zoom: " + str(scroll_zoom.errors)):
+		return
+	checks.append_array(scroll_zoom.checks)
+	print("QA section: twod")
+	var twod: Dictionary = await preload("res://addons/ROMESmoke/twod_checks.gd").run(root)
+	if not _check(twod.get("completed", false) and twod.errors.is_empty(), "2D scenes, objects and mixed worlds: " + str(twod.errors)):
+		return
+	checks.append_array(twod.checks)
+	print("QA section: multi")
+	var multi: Dictionary = await preload("res://addons/ROMESmoke/property_multi_checks.gd").run(root)
+	if not _check(multi.get("completed", false) and multi.errors.is_empty(), "Shared Studio properties: " + str(multi.errors)):
+		return
+	checks.append_array(multi.checks)
+	print("QA section: menu_report")
+	var menu_report: Dictionary = await preload("res://addons/ROMESmoke/explorer_menu_checks.gd").run(root)
+	if not _check(menu_report.get("completed", false) and menu_report.errors.is_empty(), "Studio Explorer menu and paste destinations: " + str(menu_report.errors)):
+		return
+	checks.append_array(menu_report.checks)
+	print("QA section: resource_view")
+	var resource_view: Dictionary = await preload("res://addons/ROMESmoke/resource_view_checks.gd").run(root)
+	if not _check(resource_view.get("completed", false) and resource_view.errors.is_empty(), "Resource thumbnails and navigation: " + str(resource_view.errors)):
+		return
+	checks.append_array(resource_view.checks)
 	# A nested main loop inside a timer callback (here the mesh previews' progress dialog) fired
 	# that timer again and freed it twice while another one was pending (0xC0000374 on close).
 	get_tree().create_timer(30.0)
@@ -227,8 +292,6 @@ func _run() -> void:
 	await get_tree().process_frame
 	if not _check(fired[0] == 1, "A nested main loop inside a timer callback does not fire it twice"):
 		return
-	var report := FileAccess.open("res://integration-result.json", FileAccess.WRITE)
-	report.store_string(JSON.stringify({"passed": true, "checks": checks}, "  "))
-	report.close()
+	_save_result(true)
 	print("ROME integration passed: ", checks.size(), " checks")
 	get_tree().quit()

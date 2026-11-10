@@ -161,6 +161,18 @@ static func run(root: Node) -> Dictionary:
 	native.emit_signal("rome_insert_object", "TextLabel")
 	var label := _selected(selection)
 	_expect(label != null and label.get_parent() != null and label.get_parent().is_class("ScreenGui") and label.get_parent().get_parent() == root.get_node("StarterGui"), "A GUI object without a GUI parent goes into a ScreenGui", report)
+	_show_inspector()
+	EditorInterface.edit_node(label)
+	await _frames(3)
+	var gui_panel := _panel()
+	if _expect(gui_panel != null and gui_panel.rows.has("Size"), "GUI properties use the Studio grid", report):
+		var gui_size: TreeItem = gui_panel.rows.Size
+		_expect(gui_size.get_child_count() == 2 and gui_size.get_child(0).get_child_count() == 2 and gui_size.get_child(0).get_child(0).get_text(0) == "Scale" and gui_size.get_child(0).get_child(1).get_text(0) == "Offset", "UDim2 expands into X/Y with Scale and Offset", report)
+		var original_size: Vector4 = label.get("Size")
+		gui_panel._commit_components(gui_size.get_child(0).get_metadata(0), Vector2(0.5, 140))
+		_expect(label.get("Size") == Vector4(0.5, 140, original_size.z, original_size.w), "Editing UDim2 X preserves both Y components", report)
+		await _undo(history)
+		_expect(label.get("Size") == original_size, "UDim2 component edits support Undo", report)
 	await _undo(history)
 	selection.clear()
 	native.emit_signal("rome_insert_object", "Accessory")
@@ -180,6 +192,36 @@ static func run(root: Node) -> Dictionary:
 	var expected := ["Datos", "Apariencia", "Colisión", "Comportamiento", "Pieza", "Transformar", "Atributos"]
 	_expect(expected.all(func(title: String) -> bool: return titles.has(title)) and titles[0] == "Datos" and titles[-1] == "Atributos", "Properties are grouped in Studio sections: " + str(titles), report)
 	_expect(panel.visible_rows("Datos") == PackedStringArray(["Name", "ClassName", "Parent"]), "Datos shows Name, ClassName and Parent", report)
+	var object_header := panel.find_child("ROMEPropertyObjectName", true, false) as Label
+	_expect(object_header != null and object_header.text == 'Part "%s"' % first.name, "Properties identify the selected object's class and name", report)
+	var position_row: TreeItem = panel.rows.position
+	_expect(position_row.collapsed and position_row.get_child_count() == 3 and position_row.get_child(0).get_text(0) == "X" and position_row.get_child(2).get_text(0) == "Z", "Vectors have collapsed X/Y/Z component editors", report)
+	position_row.collapsed = false
+	panel._section_folded(position_row)
+	var original_position: Vector3 = first.position
+	var x_row := position_row.get_child(0)
+	x_row.set_text(1, "12.5")
+	var x_meta: Dictionary = x_row.get_metadata(0)
+	var parsed: Variant = panel._parse(x_row, x_meta)
+	panel._commit_components(x_meta, parsed)
+	_expect(first.position.is_equal_approx(Vector3(12.5, original_position.y, original_position.z)), "Editing X preserves Y and Z", report)
+	await _undo(history)
+	_expect(first.position.is_equal_approx(original_position), "Vector component edits support Undo", report)
+	history.redo()
+	_expect(is_equal_approx(first.position.x, 12.5), "Vector component edits support Redo", report)
+	await _undo(history)
+	panel = _panel()
+	_expect(not panel.rows.position.collapsed, "Expanded vector state survives Inspector rebuilds", report)
+	var rotation_row: TreeItem = panel.rows.rotation
+	var original_rotation: Vector3 = first.rotation
+	panel._commit_components(rotation_row.get_child(1).get_metadata(0), 90.0)
+	_expect(is_equal_approx(first.rotation.y, PI / 2) and is_equal_approx(first.rotation.x, original_rotation.x) and is_equal_approx(first.rotation.z, original_rotation.z), "Orientation components edit degrees while preserving the other axes", report)
+	await _undo(history)
+	panel = _panel()
+	var invalid_row: TreeItem = panel.rows.position.get_child(0)
+	invalid_row.set_text(1, "1e9999")
+	_expect(panel._parse(invalid_row, invalid_row.get_metadata(0)) == null, "Non-finite coordinates are rejected", report)
+	panel._update_property()
 	panel.commit("Transparency", 0.5)
 	_expect(is_equal_approx(float(first.get("Transparency")), 0.5), "Editing a property changes the Part", report)
 	await _undo(history)
@@ -205,6 +247,14 @@ static func run(root: Node) -> Dictionary:
 		_expect(is_zero_approx(float(first.get_meta("Velocidad", -1.0))), "Attribute edits support Undo", report)
 	var filter_box := _filter_box()
 	if _expect(filter_box != null, "The property filter is available", report):
+		var event := InputEventKey.new()
+		event.keycode = KEY_P
+		event.ctrl_pressed = true
+		event.shift_pressed = true
+		event.pressed = true
+		EditorInterface.get_base_control().get_viewport().push_input(event)
+		await _frames(2)
+		_expect(filter_box.has_focus(), "Ctrl+Shift+P focuses the property filter globally", report)
 		filter_box.text = "Anch"
 		filter_box.text_changed.emit("Anch")
 		await _frames(3)
@@ -222,6 +272,7 @@ static func run(root: Node) -> Dictionary:
 		code_editor = code_editor or property.get_edited_property() == &"codigo_luau"
 	_expect(panel != null and panel.section_titles().has("Comportamiento") and panel.visible_rows("Comportamiento").has("Enabled") and code_editor, "Scripts show Studio properties and keep their code resource", report)
 	await _undo(history)
+	await _camera_checks(report)
 	selection.clear()
 	native.emit_signal("rome_insert_object", "PointLight")
 	await _frames(3)
@@ -244,6 +295,49 @@ static func _part(parent: Node, root: Node, title: String, position: Vector3, si
 	parent.add_child(part)
 	part.owner = root
 	return part
+
+static func _camera_checks(report: Dictionary) -> void:
+	var viewport := EditorInterface.get_editor_viewport_3d(0)
+	var camera := viewport.get_camera_3d()
+	var surface: Control
+	for child in viewport.get_parent().get_parent().get_children():
+		if child is Control and child.focus_mode == Control.FOCUS_ALL and not child.get_signal_connection_list("gui_input").is_empty():
+			surface = child
+	if not _expect(surface != null and camera != null, "3D camera exposes its navigation surface", report):
+		return
+	var settings := EditorInterface.get_editor_settings()
+	var key := "editors/3d/navigation/rome_studio_controls"
+	var original: bool = settings.get_setting(key)
+	settings.set_setting(key, true)
+	await EditorInterface.get_base_control().get_tree().create_timer(1.7).timeout
+	var before := camera.global_transform
+	await _middle_drag(surface)
+	_expect(before.basis.is_equal_approx(camera.global_transform.basis) and before.origin.distance_to(camera.global_position) > 0.01, "Middle mouse pans the camera without rotating it", report)
+	settings.set_setting(key, false)
+	await EditorInterface.get_base_control().get_tree().create_timer(1.7).timeout
+	before = camera.global_transform
+	await _middle_drag(surface)
+	_expect(not before.basis.is_equal_approx(camera.global_transform.basis), "Disabling Studio controls restores native middle-mouse orbit", report)
+	settings.set_setting(key, original)
+	await EditorInterface.get_base_control().get_tree().create_timer(1.7).timeout
+
+static func _middle_drag(surface: Control) -> void:
+	var button := InputEventMouseButton.new()
+	button.button_index = MOUSE_BUTTON_MIDDLE
+	button.position = surface.size * 0.5
+	button.pressed = true
+	button.button_mask = MOUSE_BUTTON_MASK_MIDDLE
+	surface.gui_input.emit(button)
+	var motion := InputEventMouseMotion.new()
+	motion.position = button.position + Vector2(40, 15)
+	motion.global_position = surface.global_position + motion.position
+	motion.relative = Vector2(40, 15)
+	motion.button_mask = MOUSE_BUTTON_MASK_MIDDLE
+	surface.gui_input.emit(motion)
+	button.pressed = false
+	button.button_mask = 0
+	surface.gui_input.emit(button)
+	await _frames(60)
 
 static func _look_at(target: Vector3, distance: float, x_rotation: float, y_rotation: float) -> bool:
 	var editors := EditorInterface.get_base_control().find_children("*", "Node3DEditor", true, false)

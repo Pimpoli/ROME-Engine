@@ -14,16 +14,19 @@ static func run(root: Node) -> Dictionary:
 	var source := "-- ROME document integration fixture\nlocal marker = 1\nlocal another = 2\n"
 	var local_node := _make_script(root, "LocalScript", prefix + "Local", source)
 	var server_node := _make_script(root, "ServerScript", prefix + "Server", source)
-	if not _expect(local_node != null and server_node != null, "Creates two real Luau script nodes", report):
+	var module_node := _make_script(root, "ModuleScript", prefix + "Module", source)
+	if not _expect(local_node != null and server_node != null and module_node != null, "Creates real Local, Server and Module Luau script nodes", report):
 		return report
 	await _frames(4)
 	var local_script: Script = local_node.call("get_codigo_luau")
 	var server_script: Script = server_node.call("get_codigo_luau")
+	var module_script: Script = module_node.call("get_codigo_luau")
 	var main_path := root.scene_file_path
-	EditorInterface.edit_resource(local_script)
-	await _frames(4)
-	EditorInterface.edit_resource(server_script)
-	await _frames(4)
+	# Editable Tree cells normally rename on double-click. Route real GUI input
+	# through the clicked row, even when a different node was selected before it.
+	await _double_click_script(local_node, server_node, local_script, report)
+	await _double_click_script(server_node, local_node, server_script, report)
+	await _double_click_script(module_node, server_node, module_script, report)
 	var documents: Array = tabs.call("rome_get_documents")
 	_expect(_index(documents, "scene", main_path) >= 0, "Main scene remains in the shared document bar", report)
 	var local_index := _index(documents, "script", local_script.resource_path)
@@ -41,6 +44,24 @@ static func run(root: Node) -> Dictionary:
 		return report
 	code.set_caret_line(2)
 	code.set_caret_column(5)
+	code.grab_focus()
+	var filter_key := InputEventKey.new()
+	filter_key.keycode = KEY_P
+	filter_key.physical_keycode = KEY_P
+	filter_key.ctrl_pressed = true
+	filter_key.shift_pressed = true
+	filter_key.pressed = true
+	Input.parse_input_event(filter_key)
+	await _frames(3)
+	var property_filter: LineEdit = preload("res://addons/ROMESmoke/studio_panels_checks.gd")._filter_box()
+	_expect(property_filter != null and property_filter.has_focus(), "Property search shortcut also works while editing Luau code", report)
+	code.grab_focus()
+	filter_key.keycode = KEY_X
+	filter_key.physical_keycode = KEY_X
+	Input.parse_input_event(filter_key)
+	await _frames(3)
+	var explorer_filter := EditorInterface.get_base_control().find_child("ROMEExplorerFilter", true, false) as LineEdit
+	_expect(explorer_filter != null and explorer_filter.has_focus(), "Explorer search shortcut also works while editing Luau code", report)
 	tabs.call("rome_select_document", _index(tabs.call("rome_get_documents"), "scene", main_path))
 	await _frames(4)
 	_expect(EditorInterface.get_edited_scene_root() == root and not scripts.is_visible_in_tree(), "Selecting the current scene directly returns to the world", report)
@@ -48,6 +69,18 @@ static func run(root: Node) -> Dictionary:
 	await _frames(4)
 	_expect(scripts.get_current_script() == local_script and scripts.get_current_editor() == editor, "Returning to a script reuses the same editor and resource", report)
 	_expect(code.get_caret_line() == 2 and code.get_caret_column() == 5, "Scene switching preserves the script caret", report)
+	# Luau has no formatter yet: Formato and Auto Indent must leave the code as it is.
+	var written := code.text
+	var format_tool := EditorInterface.get_base_control().get_parent().find_child("ToolFormato", true, false) as Button
+	if _expect(format_tool != null, "The Script tab offers Formato", report):
+		format_tool.pressed.emit()
+		await _frames(3)
+		_expect(not written.is_empty() and code.text == written, "Formato keeps the Luau code when its language has no formatter", report)
+	var indent := _auto_indent(scripts)
+	if _expect(not indent.is_empty(), "The script editor offers Auto Indent", report):
+		indent[0].id_pressed.emit(indent[1])
+		await _frames(3)
+		_expect(code.text == written, "Auto Indent keeps the Luau code instead of closing the editor", report)
 
 	# A separately named scene must coexist with scripts and switch the Explorer.
 	var native := EditorInterface.get_base_control().get_parent()
@@ -113,11 +146,14 @@ static func run(root: Node) -> Dictionary:
 	server_index = _index(tabs.call("rome_get_documents"), "script", server_script.resource_path)
 	if server_index >= 0:
 		tabs.call("rome_close_document", server_index)
+	var module_index := _index(tabs.call("rome_get_documents"), "script", module_script.resource_path)
+	if module_index >= 0:
+		tabs.call("rome_close_document", module_index)
 	await _frames(4)
 	return report
 
 static func _make_script(root: Node, type: String, title: String, source: String) -> Node:
-	var parent: Node = root.get_node_or_null("StarterPlayer/StarterPlayerScripts") if type == "LocalScript" else root.get_node_or_null("ServerScriptService")
+	var parent: Node = root.get_node_or_null("StarterPlayer/StarterPlayerScripts" if type == "LocalScript" else "ReplicatedStorage" if type == "ModuleScript" else "ServerScriptService")
 	if parent == null:
 		return null
 	var folder := "res://Scripts/" + type
@@ -141,6 +177,49 @@ static func _make_script(root: Node, type: String, title: String, source: String
 	node.owner = root
 	return node
 
+static func _double_click_script(node: Node, previously_selected: Node, script: Script, report: Dictionary) -> void:
+	EditorInterface.set_main_screen_editor("3D")
+	var native := EditorInterface.get_base_control().get_parent()
+	var filter := native.find_child("ROMEExplorerFilter", true, false) as LineEdit
+	var editors := native.find_children("*", "SceneTreeEditor", true, false)
+	if not _expect(filter != null and not editors.is_empty(), "Script double-click has an Explorer", report):
+		return
+	var tree: Tree = editors[0].find_children("*", "Tree", true, false)[0]
+	var original_filter := filter.text
+	filter.text = str(node.name)
+	filter.text_changed.emit(filter.text)
+	await _frames(4)
+	var row: TreeItem = preload("res://addons/ROMESmoke/explorer_checks.gd")._row(tree.get_root(), str(node.name))
+	if not _expect(row != null, "Script double-click finds " + node.get_class(), report):
+		return
+	var selection := EditorInterface.get_selection()
+	selection.clear()
+	selection.add_node(previously_selected)
+	tree.scroll_to_item(row)
+	await _frames(3)
+	var area := tree.get_item_area_rect(row)
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.button_mask = MOUSE_BUTTON_MASK_LEFT
+	event.pressed = true
+	event.double_click = true
+	event.position = tree.get_global_transform() * Vector2(minf(120, tree.size.x * 0.6), area.get_center().y)
+	event.global_position = event.position
+	tree.get_viewport().push_input(event)
+	event = event.duplicate()
+	event.pressed = false
+	event.double_click = false
+	event.button_mask = 0
+	tree.get_viewport().push_input(event)
+	await _frames(6)
+	var scripts := EditorInterface.get_script_editor()
+	_expect(scripts.get_current_script() == script and scripts.is_visible_in_tree(), "Double-click opens the clicked " + node.get_class() + " code", report)
+	var renaming := tree.get_children(true).any(func(child: Node) -> bool: return child is Popup and child.visible)
+	_expect(not renaming, "Script double-click does not start renaming " + node.get_class(), report)
+	filter.text = original_filter
+	filter.text_changed.emit(original_filter)
+	await _frames(3)
+
 static func _index(documents: Array, kind: String, path: String) -> int:
 	for index in documents.size():
 		if documents[index].kind == kind and documents[index].path == path:
@@ -153,6 +232,19 @@ static func _expect(value: bool, label: String, report: Dictionary) -> bool:
 	else:
 		report.errors.append(label)
 	return value
+
+# The Auto Indent entry of the script menus, found by its Ctrl+I shortcut.
+static func _auto_indent(scripts: Node) -> Array:
+	var key := InputEventKey.new()
+	key.keycode = KEY_I
+	key.ctrl_pressed = true
+	key.pressed = true
+	for menu: PopupMenu in scripts.find_children("*", "PopupMenu", true, false):
+		for index in menu.item_count:
+			var shortcut := menu.get_item_shortcut(index)
+			if shortcut != null and shortcut.matches_event(key):
+				return [menu, menu.get_item_id(index)]
+	return []
 
 static func _close_prompt(scripts: Node, prefix: String) -> ConfirmationDialog:
 	for dialog: ConfirmationDialog in scripts.find_children("*", "ConfirmationDialog", true, false):
