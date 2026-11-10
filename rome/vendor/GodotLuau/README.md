@@ -6,6 +6,11 @@ GodotLuau is a C++ GDExtension that embeds the [Luau](https://luau.org/) interpr
 
 **Author:** PimpoliDev · **Repo:** https://github.com/Pimpoli/GodotLuau · **License:** MIT
 
+**Local development addition:** owner-operated project backups and dedicated
+servers for a PC or VM, with Local / Server Real editor modes. See the
+[self-hosted server guide](GodotLuau/DedicatedServer/manager/README.md).
+This does not add automatic multiplayer replication to the 2D scaffolding.
+
 ### 🌐 Read this in Spanish → **[README - Espanol.md](README%20-%20Espanol.md)** (misma información, en español)
 
 > **Disclaimer:** GodotLuau is an independent project. It is **not** affiliated with, endorsed by, or sponsored by Roblox Corporation or the Godot Foundation. "Roblox" is a trademark of Roblox Corporation and is referenced here only to describe API compatibility. GodotLuau does not connect to Roblox servers and ships no Roblox assets.

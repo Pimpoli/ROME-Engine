@@ -7,6 +7,14 @@ extends "res://addons/GodotLuauUpdater/plugin_ia.gd"
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+var _server_manager: Node
+
+func _build() -> bool:
+	return _server_manager.before_play() if is_instance_valid(_server_manager) else true
+
+func _run_scene(_scene: String, args: PackedStringArray) -> PackedStringArray:
+	return _server_manager.run_arguments(args) if is_instance_valid(_server_manager) else args
+
 func _enter_tree() -> void:
 	_detect_editor_lang()
 	_compute_theme_colors()
@@ -24,6 +32,9 @@ func _enter_tree() -> void:
 	_connect_script_lifecycle()
 	_purge_old_trash()
 	_build_mp_toolbar()
+	_server_manager = preload("res://addons/GodotLuauUpdater/server_manager.gd").new()
+	add_child(_server_manager)
+	_server_manager.setup(self, _mp_bar)
 	_setup_luau_highlighting()
 	_inspector_plugin = ScriptEnabledInspector.new()
 	add_inspector_plugin(_inspector_plugin)
@@ -31,6 +42,9 @@ func _enter_tree() -> void:
 	call_deferred("_asegurar_logo_defecto")
 
 func _exit_tree() -> void:
+	if is_instance_valid(_server_manager):
+		_server_manager.teardown()
+		_server_manager = null
 	if _inspector_plugin != null:
 		remove_inspector_plugin(_inspector_plugin)
 		_inspector_plugin = null
@@ -146,6 +160,14 @@ func _build_panel_contents() -> void:
 	vbox.add_theme_constant_override("separation", 10)
 	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	outer.add_child(vbox)
+	var servers_button := Button.new()
+	servers_button.text = "Servidores, copias y publicación"
+	servers_button.tooltip_text = "Configura tu PC o servidor remoto, el guardado automático y las pruebas de red."
+	servers_button.pressed.connect(func() -> void:
+		if is_instance_valid(_server_manager):
+			make_bottom_panel_item_visible(_server_manager.panel)
+	)
+	vbox.add_child(servers_button)
 
 	# ── Header: solo título + idioma ─────────────────────────────────────
 	var hdr_row := HBoxContainer.new()
@@ -648,6 +670,9 @@ func _build_panel_contents() -> void:
 
 	dbg_vb.add_child(_make_row(_t("notif_outdated_title"), _t("notif_outdated_desc"),
 		"godot_luau/notify_outdated_version", true))
+
+	dbg_vb.add_child(_make_row(_t("loading_title"), _t("loading_desc"),
+		"godot_luau/loading_screen_on_play", true))
 
 	# ══ ZONA 5 · 🎨 APARIENCIA ═══════════════════════════════════════════
 	var z_app := _make_zone(_t("sec_appearance"), Color(0.85, 0.6, 1.0))

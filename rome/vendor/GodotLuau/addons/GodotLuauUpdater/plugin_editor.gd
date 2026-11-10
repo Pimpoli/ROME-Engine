@@ -358,6 +358,10 @@ func _neutralize_native_instances() -> void:
 # editor's Game panel) becomes the SERVER VIEW: it hosts, has no character and
 # starts with the free camera — exactly like Roblox Studio's local test.
 func _on_native_play() -> void:
+	var servers := get_node_or_null("GodotLuauServers")
+	if servers != null and servers.is_remote():
+		_kill_mp_children()
+		return
 	# Always close the windows we launched before (so a previous run's client
 	# windows never linger and inflate the count on the next Play).
 	_kill_mp_children()
@@ -366,8 +370,8 @@ func _on_native_play() -> void:
 	if count < 2:
 		return
 	var device := _mp_device_name()
-	# Ensure the extra windows load the CURRENT project state from disk.
-	EditorInterface.save_all_scenes()
+	# _build saves before launch. Calling Save All here stops the native host
+	# that just started, leaving the extra client windows without their server.
 	# Run the SAME scene the server runs (F5 main / F6 current / F7 custom) so
 	# every window shares one world. Only a real scene path is forwarded.
 	var scene := str(EditorInterface.get_playing_scene())
@@ -790,6 +794,8 @@ func _register_settings() -> void:
 		"TEST: play a placeholder code animation on the default character (idle/walk bob). For testing only, until real rigged animations are added.")
 	_add_bool("godot_luau/notify_outdated_version",    true,
 		"Print a warning in Output when running an outdated GodotLuau version.")
+	_add_bool("godot_luau/loading_screen_on_play",     true,
+		"Show the GodotLuau loading screen when you press Play in the editor. Exported games always show it.")
 	_add_bool("godot_luau/instant_autocomplete",       true,
 		"Trigger autocomplete suggestions instantly on every keystroke.")
 	_add_bool("godot_luau/custom_autocomplete_enabled", false,

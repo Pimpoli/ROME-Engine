@@ -38,6 +38,7 @@ def keep_luau_with_rome(project: Path):
 def refresh_rome(output: Path):
     """Update only ROME assets/editor code, leaving all GodotLuau components intact."""
     project = output / "project"
+    shutil.copy2(ROOT / "rome/start_server.cmd", output.parent / "Iniciar servidor ROME.cmd")
     if not (project / "GodotLuau/godot_luau.gdextension").is_file():
         raise SystemExit("An existing runtime bundle is required for --rome-only.")
     keep_luau_with_rome(project)
@@ -86,6 +87,7 @@ def package(source: Path, output: Path, binary_source: Path | None = None):
         raise SystemExit("GodotLuau debug DLL is missing. Build the source checkout first.")
     project = output / "project"
     project.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "rome/start_server.cmd", output.parent / "Iniciar servidor ROME.cmd")
     ignore = shutil.ignore_patterns("*.import", "*.o", "*.obj", "*.a", "*.lib", "*.exp", "*.pdb", "__pycache__")
     for name in ("bin", "icons", "assets", "DefaultScripts", "shaders", "licenses", "DedicatedServer"):
         if (payload / name).is_dir():
