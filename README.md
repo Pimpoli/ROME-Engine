@@ -95,27 +95,97 @@ el proceso para integrar cambios del núcleo se documentan en [UPSTREAM.md](rome
 
 ## Qué incluye
 
-- **Inicio de experiencias** con las plantillas Baseplate, En blanco y Classic Obby.
-- **Barra de herramientas** con Inicio, Avatar, UI, Script, Modelo y Plugins.
+### Cambios locales en desarrollo (todavía sin nueva Release)
+
+- **Paneles > Distribución estilo Studio** coloca Explorador y Propiedades
+  a la derecha, con Salida debajo de la escena. Es la distribución inicial de
+  las experiencias nuevas. Las experiencias con un diseño guardado pueden
+  aplicarla desde el icono de paneles en la esquina superior derecha.
+- Recursos permite renombrar con F2, mover a otra carpeta y arrastrar archivos
+  y carpetas; actualiza las referencias mediante el sistema nativo del editor.
+- Las pestañas muestran la X al pasar el ratón, sin desplazar los títulos.
+  La rueda en perspectiva desplaza la cámara sin detenerse en el punto de órbita.
+- Experiencias permite ordenar por nombre, última edición o tamaño; su menú
+  ofrece quitar de la lista, enviar la carpeta a la papelera, o ambas acciones.
+- Las plantillas 2D y 2D + 3D incluyen un circuito editable con cristales,
+  checkpoint, plataforma móvil y meta. En la mixta, F2 alterna la prueba 2D/3D.
+  Esta mecánica inicial es local; no añade replicación multijugador 2D.
+- GodotLuau incluye perfiles de servidores propios, copias cada cinco minutos
+  y antes de jugar cuando hay cambios, publicación y pruebas contra un servidor
+  dedicado. **Server Real** conecta con la última publicación;
+  **Preparar y probar** publica los cambios antes de conectar.
+
+Para alojarlo en tu PC o en una VM, consulta la
+[guía de servidor propio](rome/vendor/GodotLuau/GodotLuau/DedicatedServer/manager/README.md).
+El paquete local de Windows incluye **Iniciar servidor ROME.cmd** junto al
+editor; requiere Python 3.10 o posterior. Los cambios de esta sección no están
+todavía en la descarga pública enlazada arriba.
+
+### Herramientas del editor
+
+- **Inicio de experiencias** con Baseplate, En blanco, Classic Obby,
+  **Escena 2D** y **2D + 3D**.
+- **Barra de herramientas** con Inicio, Modelo, Avatar, UI, Script y Plugins.
   Pieza, Script, GUI, Material, Color, Grupo, Bloquear y Anclar tienen su menú
-  desplegable; el ajuste de movimiento y giro se activa con su casilla, y los
+  desplegable. El ajuste de movimiento y giro se activa con su casilla, y los
   atajos son los de Studio (Ctrl+1…5, Ctrl+L, Ctrl+G, Ctrl+U). El botón **+**
   crea pestañas personalizadas con herramientas, separadores y opciones para
-  renombrar, duplicar y reorganizar.
+  renombrar, duplicar y reorganizar. El menú **⋮** de la esquina superior
+  derecha permite compactar la barra, mostrar u ocultar etiquetas, plegar
+  las herramientas y alinear las pestañas a la izquierda. Con la barra plegada,
+  pasar el ratón por una pestaña muestra sus herramientas temporalmente.
+  Estas preferencias se conservan entre sesiones. Si creas muchas pestañas,
+  la fila se desplaza para mantener visible la activa. La pestaña y la
+  herramienta activas tienen un fondo gris. Cuando hay más comandos de los
+  que caben en pantalla, las flechas permiten recorrerlos. Al cambiar de
+  pestaña se vuelve al primer comando.
+- **Paneles con cabeceras compactas**, tonos grises uniformes y botones directos
+  para separar o cerrar el panel activo. Cerrar un panel lo oculta; puedes
+  recuperarlo desde Ventana o su herramienta. Las pestañas de documentos
+  conservan su acento para distinguir el archivo activo.
 - **Pestañas compartidas para escenas y scripts**. Cada script muestra su nombre
   con el icono de su tipo; seleccionar una escena vuelve a su mundo y
-  seleccionar un script abre su código. Clic central cierra la pestaña.
+  seleccionar un script abre su código. Un doble clic sobre un LocalScript,
+  ServerScript o ModuleScript del Explorador abre directamente su documento.
+  Clic central cierra la pestaña.
 - **Insertar objeto** con buscador, categorías y objetos recientes, también desde
   el **+** que aparece al pasar por cada fila del Explorador. Las piezas nuevas
   aparecen delante de la cámara.
 - **Propiedades por secciones** (Datos, Apariencia, Colisión, Comportamiento…)
-  con **Atributos** que se agregan y eliminan desde el panel.
-- **Recursos organizados por carpetas**, con creación de carpetas y acceso al
+  con **Atributos** que se agregan y eliminan desde el panel. Position, Size y
+  Orientation se despliegan en sus ejes; los valores UDim2 de UI muestran X/Y
+  con Scale y Offset. Los cambios conservan Deshacer/Rehacer y el estado
+  desplegado. **Ctrl+Mayús+P** lleva al filtro incluso desde un script.
+  Al seleccionar varios objetos, el mismo panel muestra sus campos comunes
+  y marca los valores diferentes con **—**. Puedes editar todos a la vez;
+  cambiar solo X conserva el Y/Z particular de cada objeto. En esta vista,
+  los atributos se administran seleccionando un único objeto.
+- **Cámara del editor:** arrastrar con el botón central desplaza la vista sin
+  girarla; botón derecho conserva la navegación libre. Alt+botón central permite
+  orbitar. Puedes recuperar los controles nativos desactivando
+  `editors/3d/navigation/rome_studio_controls` en los ajustes del editor.
+- **Arrastre continuo en 3D:** al mover, girar o escalar con el botón izquierdo,
+  el cursor salta al borde opuesto del área de trabajo y el objeto conserva el
+  recorrido. Deshacer revierte el arrastre completo. Se puede desactivar con
+  `editors/3d/navigation/continuous_transform_grab`.
+- **Recursos abajo a la izquierda**, organizados por carpetas, con colores por
+  tipo, contador de resultados, creación de carpetas y acceso al
   navegador de archivos completo. `Scenes` se muestra con el nombre traducido
   del editor, como **Escenas**, sin cambiar sus rutas. Los scripts se organizan
   en `Scripts/LocalScript`, `Scripts/ServerScript` y `Scripts/ModuleScript`.
+  El botón de miniaturas alterna el árbol y una cuadrícula con previews,
+  navegación por carpetas y búsqueda; recuerda la vista dentro del proyecto.
 - **Explorador con servicios fijos** en la escena principal y escenas de modelos
-  reutilizables que no necesitan repetir esa jerarquía.
+  reutilizables que no necesitan repetir esa jerarquía. **Ctrl+Mayús+X** busca
+  y **Ctrl+I** abre Insertar objeto. Puedes combinar nombres con `is:Clase`,
+  por ejemplo `Moving is:BasePart`; los resultados conservan sus ancestros y
+  **Ctrl+A** selecciona solo las coincidencias. El menú incluye agrupación como
+  Modelo/Carpeta y selección de hijos o padres. La búsqueda revela ramas
+  temporalmente y recupera su plegado al limpiarla.
+  El menú contextual muestra las acciones habituales primero y conserva las
+  herramientas nativas en **Avanzado**. **Ctrl+V** pega en Workspace;
+  **Ctrl+Mayús+V** pega dentro de todos los padres seleccionados, con una sola
+  acción de Deshacer. Los servicios fijos conservan sus protecciones.
 - **Classic Obby de seis etapas**, con plataformas móviles, obstáculos letales,
   checkpoints y HUD. El movimiento y transporte de pasajeros se ejecutan en
   LocalScript; el daño, avance y respawn se controlan desde el servidor.
@@ -123,6 +193,29 @@ el proceso para integrar cambios del núcleo se documentan en [UPSTREAM.md](rome
 <p align="center">
   <img src="rome/assets/hub/obby.png" alt="Vista general de la plantilla Classic Obby de ROME" width="520">
 </p>
+
+### Base para juegos 2D y mixtos
+
+Elige **Escena 2D** para empezar con suelo, plataformas con colisión, cámara y
+el personaje 2D existente. A/D o las flechas permiten moverse y Espacio saltar.
+Los botones **2D / 3D** cambian de espacio de trabajo; mover, girar y escalar
+desde la barra también actúa sobre el lienzo 2D. El **+** de Recursos crea una
+escena reutilizable 2D o 3D, sin repetir los servicios del juego.
+
+**Insertar objeto → Mundo 2D** ofrece sprites, animaciones, cuerpos físicos,
+colisiones, cámaras, mapas de tiles, rutas y marcadores. Los objetos conservan
+el Inspector nativo 2D, sus recursos y Deshacer/Rehacer. Una escena 2D también
+puede insertarse en un juego 3D: ROME crea una rama `Workspace/World2D` cuando
+hace falta. **Composición 2D / 3D** incluye SubViewport y SubViewportContainer
+para preparar vistas separadas. La plantilla mixta comparte inicialmente el
+viewport: sus ramas 2D y 3D tienen transformaciones y físicas independientes.
+
+Es una base experimental. GodotLuau sigue teniendo soporte 2D parcial: los
+scripts de arranque que asumen 3D permanecen disponibles pero desactivados en
+la nueva plantilla 2D. El personaje utiliza su movimiento nativo existente;
+la reaparición, el multijugador y la equivalencia completa de APIs 2D aún
+requieren trabajo con el equipo de GodotLuau. Su código y sus binarios no se
+han modificado para añadir estas herramientas.
 
 ## Estado del proyecto
 

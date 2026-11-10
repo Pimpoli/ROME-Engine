@@ -66,3 +66,23 @@ This updates ROMEStudio, its template artwork, the gallery and the editor copy.
 It leaves the extension's code, updater addon and binaries intact. Gameplay
 sources for the new Classic Obby live in `addons/ROMEStudio/templates/` and are
 copied into each new game's `Scripts/ClassicObby/` directory for editing.
+
+## 2D foundation
+
+The hub offers `2d` (Game2D) and `mixed` (Game3D with an ordinary World2D branch).
+`studio_2d.gd` builds new-experience scaffolding after the extension creates its
+services. It keeps unfinished 3D factory startup scripts disabled in pure 2D;
+it does not rewrite their source. Game2D's existing native Character2D supplies
+movement, gravity and jump. Its current respawn/network limitations remain.
+
+The ribbon's 2D/3D buttons remember the active world per scene during the
+session. Resource scenes and native 2D insertion share routing, placement and
+Undo. Physics shapes require a body/area and followers require a path, including
+compatible reusable-scene roots. Composition uses explicit SubViewport targets.
+
+Editor QA: `qa/twod_checks.gd` in the normal disposable integration fixture.
+Template QA: enable `qa/twod_template_bake.gd` only as an EditorPlugin in a new
+disposable 2d/mixed project. After it saves and quits, run
+`--headless --path <fixture> --script <copied twod_runtime_checks.gd> --fixed-fps 60`
+to check actual movement, jumping and collision. Never enable the bake plugin
+in a creator's real experience.

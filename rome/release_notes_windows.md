@@ -1,0 +1,2 @@
+- ROME todavía no tiene firma digital. Si Windows muestra «Windows protegió su PC», pulsa **Más información** y luego **Ejecutar de todas formas**. El aviso significa que Windows no reconoce al autor del archivo, no que haya detectado un virus. Descarga ROME solo desde esta página.
+- Para comprobar el archivo, ejecuta en PowerShell `Get-FileHash .\ROME-Studio-<versión>-windows-x86_64.exe -Algorithm SHA256` y compara el resultado con el SHA-256 de estas notas.
