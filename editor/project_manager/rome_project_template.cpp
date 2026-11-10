@@ -261,19 +261,31 @@ Error RomeProjectTemplate::install(const String &p_path, const String &p_templat
 	ERR_FAIL_COND_V(err != OK, err);
 	Ref<FileAccess> scene = FileAccess::open(p_path.path_join("Scenes/Place.tscn"), FileAccess::WRITE, &err);
 	ERR_FAIL_COND_V(scene.is_null(), err);
-	const Vector<String> allowed = { "baseplate", "empty", "obby" };
+	const Vector<String> allowed = { "baseplate", "empty", "obby", "2d", "mixed" };
 	const String template_id = allowed.has(p_template) ? p_template : String("baseplate");
-	scene->store_string("[gd_scene format=3]\n\n[node name=\"Game\" type=\"Game3D\"]\nmetadata/rome_template = \"" + template_id + "\"\n");
+	// Game roots initialize their services only while empty. ROMEStudio builds
+	// the starter content after that initialization, in the appropriate workspace.
+	const String dimension = template_id == "2d" ? String("2d") : template_id == "mixed" ? String("mixed") : String("3d");
+	scene->store_string("[gd_scene format=3]\n\n[node name=\"Game\" type=\"" + String(template_id == "2d" ? "Game2D" : "Game3D") + "\"]\nmetadata/rome_template = \"" + template_id + "\"\nmetadata/rome_dimension = \"" + dimension + "\"\n");
 	return write_stamp(p_path, get_identity(), managed_files(read_json(get_root().path_join("manifest.json"))));
 }
 
-void RomeProjectTemplate::configure(ProjectSettings::CustomMap &r_settings) {
+void RomeProjectTemplate::configure(ProjectSettings::CustomMap &r_settings, const String &p_template) {
 	r_settings["application/run/main_scene"] = "res://Scenes/Place.tscn";
 	r_settings["application/config/description"] = "Creado con ROME Studio y Luau";
 	r_settings["editor_plugins/enabled"] = PackedStringArray({ "res://addons/GodotLuauUpdater/plugin.cfg", "res://addons/ROMEStudio/plugin.cfg" });
 	r_settings["physics/3d/physics_engine"] = "Jolt Physics";
 	r_settings["rendering/rendering_device/driver.windows"] = "vulkan";
 	r_settings["rome/studio/enabled"] = true;
+	r_settings["rome/studio/dimension"] = p_template == "2d" ? "2d" : p_template == "mixed" ? "mixed" : "3d";
+	if (p_template == "2d" || p_template == "mixed") {
+		r_settings["display/window/size/viewport_width"] = 1280;
+		r_settings["display/window/size/viewport_height"] = 720;
+	}
+	if (p_template == "2d") {
+		r_settings["display/window/stretch/mode"] = "canvas_items";
+		r_settings["rendering/environment/defaults/default_clear_color"] = Color(0.045, 0.075, 0.12);
+	}
 }
 
 // Brings the experience's copy of ROMEStudio and GodotLuau to the runtime of

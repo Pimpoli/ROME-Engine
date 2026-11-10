@@ -578,7 +578,7 @@ void ProjectDialog::ok_pressed() {
 			_set_message(TTRC("No se pudo instalar GodotLuau. Comprueba que rome_runtime esté junto al ejecutable de ROME."), MESSAGE_ERROR);
 			return;
 		}
-		RomeProjectTemplate::configure(initial_settings);
+		RomeProjectTemplate::configure(initial_settings, rome_template);
 
 		// Be sure to change this code if/when renderers are changed.
 		// Default values are "forward_plus" for the main setting, "mobile" for the mobile override,

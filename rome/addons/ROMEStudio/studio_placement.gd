@@ -10,6 +10,73 @@ const FALLBACK_DISTANCE := 20.0
 # A Character builds its rig at runtime; its root sits about 3 studs above the feet.
 const CHARACTER_BOUNDS := AABB(Vector3(-1, -3, -1), Vector3(2, 5, 2))
 
+## New 2D world objects use the visible canvas center, including pan and zoom.
+## Shapes and path followers are attached at their parent's local origin by the
+## insertion caller rather than placed in world space.
+static func place_2d(object: Node2D, parent: Node) -> void:
+	if parent is SubViewport:
+		object.position = Vector2(parent.size) * 0.5
+		return
+	var viewport := parent.get_viewport() as SubViewport if parent.is_inside_tree() else EditorInterface.get_editor_viewport_2d()
+	var target := Vector2.ZERO
+	if viewport != null and viewport.size.x > 0 and viewport.size.y > 0:
+		var canvas := viewport.global_canvas_transform
+		if not is_zero_approx(canvas.determinant()):
+			target = canvas.affine_inverse() * (Vector2(viewport.size) * 0.5)
+	if parent is Node2D and parent.is_inside_tree() and not is_zero_approx(parent.global_transform.determinant()):
+		object.position = parent.global_transform.affine_inverse() * target
+	else:
+		object.position = target
+
+## These resources make a freshly inserted object visible/editable immediately.
+## No children or scripts are generated; every resource belongs to this object.
+static func initialize_2d(object: Node) -> void:
+	if object is CollisionShape2D:
+		var shape := RectangleShape2D.new()
+		shape.size = Vector2(64, 64)
+		object.shape = shape
+	elif object is CollisionPolygon2D:
+		object.polygon = _square_2d()
+	elif object is Sprite2D:
+		object.texture = _placeholder_texture_2d()
+	elif object is AnimatedSprite2D:
+		var frames := SpriteFrames.new()
+		frames.add_frame(&"default", _placeholder_texture_2d())
+		object.sprite_frames = frames
+	elif object is Polygon2D:
+		object.polygon = _square_2d()
+		object.color = Color("65b8ff")
+	elif object is Line2D:
+		object.points = PackedVector2Array([Vector2(-48, 0), Vector2(48, 0)])
+		object.width = 4.0
+		object.default_color = Color("65b8ff")
+	elif object is Path2D:
+		var curve := Curve2D.new()
+		curve.add_point(Vector2(-64, 0))
+		curve.add_point(Vector2(64, 0))
+		object.curve = curve
+	elif object is SubViewport:
+		object.size = Vector2i(640, 360)
+		object.transparent_bg = true
+		object.own_world_3d = true
+	elif object is SubViewportContainer:
+		object.custom_minimum_size = Vector2(480, 270)
+		object.size = Vector2(480, 270)
+		object.stretch = true
+
+static func _square_2d() -> PackedVector2Array:
+	return PackedVector2Array([Vector2(-32, -32), Vector2(32, -32), Vector2(32, 32), Vector2(-32, 32)])
+
+static func _placeholder_texture_2d() -> Texture2D:
+	var gradient := Gradient.new()
+	gradient.set_color(0, Color("82c7ff"))
+	gradient.set_color(1, Color("3d7ee8"))
+	var texture := GradientTexture2D.new()
+	texture.width = 64
+	texture.height = 64
+	texture.gradient = gradient
+	return texture
+
 static func place(object: Node3D, parent: Node, scene_root: Node) -> void:
 	var target := target_origin(object, scene_root)
 	var parent_3d := parent as Node3D

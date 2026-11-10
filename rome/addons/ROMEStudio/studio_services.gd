@@ -18,7 +18,7 @@ var _known: Dictionary = {}
 var _watched: Array[WeakRef] = []
 
 func attach(scene: Node) -> void:
-	var next_root := scene if scene != null and scene.is_class("RobloxGame3D") else null
+	var next_root := scene if scene != null and (scene.is_class("RobloxGame3D") or scene.is_class("RobloxGame2D")) else null
 	if root != next_root:
 		_disconnect_watchers()
 		_known.clear()
@@ -60,6 +60,8 @@ func _repair() -> void:
 	var order := 0
 	for name: String in SERVICES:
 		var type: String = SERVICES[name]
+		if name == "Workspace" and root.is_class("RobloxGame2D"):
+			type = "RobloxWorkspace2D"
 		var result := _ensure_container(root, name, type, order)
 		var service := result.get("node") as Node
 		changed = changed or result.get("changed", false)

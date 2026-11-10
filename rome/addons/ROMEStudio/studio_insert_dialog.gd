@@ -63,6 +63,11 @@ func refresh() -> void:
 	var query := search.text.strip_edges()
 	var scene := EditorInterface.get_edited_scene_root()
 	var is_2d := scene != null and scene.is_class("RobloxGame2D")
+	var selection := EditorInterface.get_selection().get_selected_nodes()
+	var editing_2d := is_2d or scene is Node2D or (not selection.is_empty() and selection[0] is Node2D)
+	var native := EditorInterface.get_base_control().get_parent()
+	if native.has_method("rome_get_scene_view") and str(native.call("rome_get_scene_view")) == "2D":
+		editing_2d = true
 	var first: TreeItem
 	if query.is_empty():
 		var section: TreeItem
@@ -72,7 +77,13 @@ func refresh() -> void:
 					section = _category(tree_root, RECENT_TITLE)
 				var item := _object(section, title)
 				first = item if first == null else first
-	for category: Array in Catalog.CATEGORIES:
+	var categories := Catalog.CATEGORIES.duplicate()
+	if editing_2d:
+		for index in categories.size():
+			if categories[index][0] == "Mundo 2D":
+				categories.push_front(categories.pop_at(index))
+				break
+	for category: Array in categories:
 		var section: TreeItem
 		var whole: bool = not query.is_empty() and str(category[0]).containsn(query)
 		for title: String in category[2]:
@@ -83,7 +94,7 @@ func refresh() -> void:
 			var item := _object(section, title)
 			first = item if first == null else first
 		if section != null and query.is_empty():
-			section.collapsed = _folded.get(category[0], category[0] != "Básico")
+			section.collapsed = _folded.get(category[0], category[0] != ("Mundo 2D" if editing_2d else "Básico"))
 	_refreshing = false
 	if first != null:
 		first.select(0)

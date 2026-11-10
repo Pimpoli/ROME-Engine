@@ -7,6 +7,8 @@ extends RefCounted
 
 const CATEGORIES := [
 	["Básico", "world", ["Part", "Model", "Folder", "SpawnLocation", "MeshPart", "WedgePart", "CornerWedgePart", "TrussPart", "Seat", "VehicleSeat", "Tool", "Configuration", "Camera", "WorldModel"]],
+	["Mundo 2D", "world_2d", ["Node2D", "Sprite2D", "AnimatedSprite2D", "CharacterBody2D", "StaticBody2D", "RigidBody2D", "Area2D", "CollisionShape2D", "CollisionPolygon2D", "Camera2D", "TileMapLayer", "Path2D", "PathFollow2D", "Marker2D", "Polygon2D", "Line2D", "AudioStreamPlayer2D"]],
+	["Composición 2D / 3D", "viewport", ["SubViewport", "SubViewportContainer"]],
 	["Scripts", "script", ["Script", "LocalScript", "ModuleScript"]],
 	["Interfaz", "gui", ["ScreenGui", "BillboardGui", "SurfaceGui", "Frame", "ScrollingFrame", "CanvasGroup", "ViewportFrame", "TextLabel", "TextButton", "TextBox", "ImageLabel", "ImageButton", "VideoFrame"]],
 	["Diseño de interfaz", "gui_modifier", ["UICorner", "UIStroke", "UIGradient", "UIPadding", "UIScale", "UIListLayout", "UIGridLayout", "UIPageLayout", "UITableLayout", "UIFlexItem", "UIAspectRatioConstraint", "UISizeConstraint", "UITextSizeConstraint"]],
@@ -41,6 +43,8 @@ const KINDS := {
 	"Folder": "generic", "Configuration": "generic", "Camera": "generic", "WorldModel": "generic", "ScreenGui": "screen_gui",
 	"BillboardGui": "attach", "SurfaceGui": "attach", "Clouds": "terrain", "MaterialVariant": "material", "SoundGroup": "sound_service",
 	"Character": "world", "Character2D": "world", "Animation": "generic", "Humanoid2D": "generic",
+	"CollisionShape2D": "collision_2d", "CollisionPolygon2D": "collision_2d", "PathFollow2D": "path_follow_2d",
+	"SubViewportContainer": "gui_native",
 }
 const ONLY_2D := ["Character2D", "Humanoid2D"]
 const ICONS := {
