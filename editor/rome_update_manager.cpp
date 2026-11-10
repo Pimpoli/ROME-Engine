@@ -153,6 +153,12 @@ String release_cache_path() {
 	return cache_root().path_join("updates/releases.json");
 }
 
+// Microsoft Store copies (rome/package_msix.py) are read-only and the Store updates them.
+bool from_store() {
+	static const bool store = FileAccess::exists(OS::get_singleton()->get_executable_path().get_base_dir().path_join("AppxManifest.xml"));
+	return store;
+}
+
 Dictionary read_json_file(const String &p_path) {
 	if (p_path.is_empty() || !FileAccess::exists(p_path)) {
 		return Dictionary();
@@ -425,6 +431,14 @@ void ROMEUpdateManager::_startup_check() {
 }
 
 void ROMEUpdateManager::check_updates(bool p_force) {
+	if (from_store()) {
+		status["rome_status"] = "store";
+		status["godot_status"] = "store";
+		status["rome_message"] = String::utf8("Esta copia viene de Microsoft Store, que instala sola las versiones nuevas.");
+		status["godot_message"] = String::utf8("Se actualiza junto con ROME.");
+		_refresh_dialog();
+		return;
+	}
 	if (DisplayServer::get_singleton()->get_name() == "headless") {
 		status["rome_status"] = "headless";
 		status["rome_message"] = String::utf8("Comprobación omitida en modo sin interfaz.");
@@ -1116,7 +1130,9 @@ void ROMEUpdateManager::_refresh_dialog() {
 	const String error = status.get("action_error", "");
 	const bool on_exit = _preference(INSTALL_ON_EXIT_SETTING, true) && EditorNode::get_singleton();
 	String action;
-	if (!error.is_empty()) {
+	if (from_store()) {
+		action = String::utf8("Las actualizaciones llegan desde Microsoft Store.");
+	} else if (!error.is_empty()) {
 		action = error;
 	} else if (helper_preparing) {
 		action = String::utf8("Preparando la instalación... El editor se cerrará en cuanto esté lista.");
@@ -1141,6 +1157,7 @@ void ROMEUpdateManager::_refresh_dialog() {
 	const bool available = !update.is_empty() && !Dictionary(update.get("asset", Dictionary())).is_empty() && compare_versions(update["version"], ROME_VERSION) > 0;
 	const bool transferring = downloading || retry_msec != 0;
 	const bool busy = checking || transferring || helper_started || helper_preparing;
+	check_button->set_visible(!from_store());
 	check_button->set_disabled(busy);
 	download_button->set_visible(available && !verified);
 	download_button->set_disabled(busy);
@@ -1148,7 +1165,10 @@ void ROMEUpdateManager::_refresh_dialog() {
 	install_button->set_disabled(helper_started || helper_preparing || !quit_callback.is_valid());
 	cancel_button->set_visible(transferring);
 	progress->set_visible(transferring);
-	install_on_exit_toggle->set_visible(EditorNode::get_singleton() != nullptr);
+	startup_toggle->set_visible(!from_store());
+	auto_download_toggle->set_visible(!from_store());
+	install_on_exit_toggle->set_visible(!from_store() && EditorNode::get_singleton() != nullptr);
+	prerelease_toggle->set_visible(!from_store());
 	prerelease_toggle->set_pressed_no_signal(_include_prereleases());
 }
 
