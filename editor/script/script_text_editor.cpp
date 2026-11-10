@@ -1804,8 +1804,10 @@ bool ScriptTextEditor::_edit_option(int p_op) {
 
 			// Apply auto indented code.
 			Vector<String> lines = text.split("\n");
-			for (int i = begin; i <= end; ++i) {
-				tx->set_line(i, lines[i]);
+			if (lines.size() == tx->get_line_count()) {
+				for (int i = begin; i <= end; ++i) {
+					tx->set_line(i, lines[i]);
+				}
 			}
 
 			tx->end_multicaret_edit();

@@ -571,6 +571,10 @@ public:
 
 #ifdef TOOLS_ENABLED
 	void auto_indent_code(String &p_code, int p_from_line, int p_to_line) const {
+		// A language without a formatter leaves the code as it was, instead of emptying it.
+		if (!GDVIRTUAL_IS_OVERRIDDEN(_auto_indent_code)) {
+			return;
+		}
 		String ret;
 		GDVIRTUAL_CALL(_auto_indent_code, p_code, p_from_line, p_to_line, ret);
 		p_code = ret;
